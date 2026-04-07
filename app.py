@@ -15,13 +15,11 @@ html,body,[class*="css"]{font-family:'Noto Sans TC',sans-serif;}
 .stApp{background:#0d1117;color:#e6edf3;}
 section[data-testid="stSidebar"]{background:#161b22;border-right:1px solid #30363d;}
 section[data-testid="stSidebar"] *{color:#e6edf3 !important;}
-.main-header{background:linear-gradient(135deg,#1a3a52,#0d2137);border:1px solid #1f6feb;
-  border-radius:12px;padding:20px 28px;margin-bottom:20px;}
+.main-header{background:linear-gradient(135deg,#1a3a52,#0d2137);border:1px solid #1f6feb;border-radius:12px;padding:20px 28px;margin-bottom:20px;}
 .main-header h1{color:#58a6ff;font-size:1.9rem;margin:0;font-weight:700;}
 .main-header p{color:#8b949e;margin:6px 0 0 0;font-size:.9rem;}
 .stock-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px 20px;margin-bottom:14px;}
-.ticker{color:#58a6ff;font-size:1.1rem;font-weight:700;}
-.sname{color:#8b949e;font-size:.85rem;margin-left:6px;}
+.ticker{color:#58a6ff;font-size:1.1rem;font-weight:700;}.sname{color:#8b949e;font-size:.85rem;margin-left:6px;}
 .price{color:#e6edf3;font-size:2rem;font-weight:700;margin:4px 0;}
 .tag-up{background:#1a3a2a;color:#3fb950;border:1px solid #238636;border-radius:6px;padding:3px 10px;font-size:.82rem;font-weight:600;display:inline-block;}
 .tag-down{background:#3a1a1a;color:#f85149;border:1px solid #da3633;border-radius:6px;padding:3px 10px;font-size:.82rem;font-weight:600;display:inline-block;}
@@ -36,55 +34,91 @@ section[data-testid="stSidebar"] *{color:#e6edf3 !important;}
 .data-table tr:hover td{background:#1c2128;}
 .up{color:#3fb950;font-weight:600;}.dn{color:#f85149;font-weight:600;}
 .section-title{color:#58a6ff;font-size:1.05rem;font-weight:700;border-left:3px solid #1f6feb;padding-left:10px;margin:22px 0 14px 0;}
-.hit-item{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:9px 14px;
-  margin:3px 0;display:flex;align-items:center;gap:10px;}
+.hit-item{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:9px 14px;margin:3px 0;display:flex;align-items:center;gap:10px;}
 .hit-code{color:#58a6ff;font-weight:700;min-width:52px;}
 .hit-name{color:#e6edf3;font-size:.92rem;flex:1;}
 .hit-mkt{color:#8b949e;font-size:.75rem;background:#21262d;padding:2px 7px;border-radius:4px;}
-.stTextInput input{background:#161b22 !important;color:#e6edf3 !important;
-  border:1px solid #30363d !important;border-radius:8px !important;font-size:1rem !important;}
+.stTextInput input{background:#161b22 !important;color:#e6edf3 !important;border:1px solid #30363d !important;border-radius:8px !important;font-size:1rem !important;}
 .stTextInput input:focus{border-color:#1f6feb !important;}
 .stSelectbox>div>div{background:#161b22 !important;border:1px solid #30363d !important;color:#e6edf3 !important;}
-.stButton button{background:linear-gradient(135deg,#1f6feb,#388bfd) !important;
-  color:#fff !important;border:none !important;border-radius:8px !important;
-  font-size:1rem !important;font-weight:700 !important;padding:10px 0 !important;}
+.stButton button{background:linear-gradient(135deg,#1f6feb,#388bfd) !important;color:#fff !important;border:none !important;border-radius:8px !important;font-size:1rem !important;font-weight:700 !important;padding:10px 0 !important;}
 .stButton button:hover{opacity:.88 !important;}
 #MainMenu,footer{visibility:hidden;}
 header[data-testid="stHeader"]{background:transparent;}
 </style>
 """, unsafe_allow_html=True)
 
-# ── 台股資料庫（使用 pandas read_html 解析 TWSE）────────────
-@st.cache_data(ttl=86400, show_spinner="載入台股清單中…")
+# ── 台股資料庫：使用 twstock 套件 ──────────────────────────
+@st.cache_data(ttl=3600*12, show_spinner=False)
 def load_stock_db():
     db = {}
-    for mode, suffix in [("2","TW"),("4","TWO")]:
-        try:
-            url = f"https://isin.twse.com.tw/isin/C_public.jsp?strMode={mode}"
-            tables = pd.read_html(url, encoding="big5")
-            for tbl in tables:
-                for _, row in tbl.iterrows():
-                    cell = str(row.iloc[0]).strip()
-                    m = re.match(r'^(\d{4,5})\s+(.+)$', cell)
-                    if m and m.group(1) not in db:
-                        db[m.group(1)] = (m.group(2).strip(), suffix)
-        except Exception:
-            pass
+    try:
+        import twstock
+        # twstock.codes 是完整的台股代碼字典
+        for code, stock in twstock.codes.items():
+            if not code.isdigit():
+                continue
+            name = getattr(stock, 'name', '') or ''
+            market = getattr(stock, 'market', '') or ''
+            group = getattr(stock, 'group', '') or ''
+            # 判斷上市/上櫃
+            if '上市' in market or market == 'TWSE':
+                sfx = 'TW'
+            elif '上櫃' in market or market == 'OTC' or market == 'TPEx':
+                sfx = 'TWO'
+            else:
+                sfx = 'TW'
+            db[code] = (name, sfx)
+    except Exception:
+        pass
+
+    # Fallback 內建核心清單（當 twstock 不可用時）
+    if not db:
+        db = {
+            "1101":"台泥","1102":"亞泥","1103":"嘉泥","1216":"統一","1301":"台塑","1303":"南亞","1326":"台化",
+            "2002":"中鋼","2201":"裕隆","2207":"和泰車","2301":"光寶科","2302":"麗正","2303":"聯電",
+            "2308":"台達電","2312":"金寶","2317":"鴻海","2324":"仁寶","2327":"國巨","2330":"台積電",
+            "2344":"華邦電","2345":"智邦","2347":"聯強","2352":"佳世達","2353":"宏碁","2357":"華碩",
+            "2376":"技嘉","2377":"微星","2379":"瑞昱","2382":"廣達","2383":"台光電","2385":"群光",
+            "2395":"研華","2408":"南亞科","2409":"友達","2412":"中華電","2421":"建準","2439":"美律",
+            "2448":"晶電","2449":"京元電子","2451":"創見","2454":"聯發科","2455":"全新","2456":"奇力新",
+            "2474":"可成","2481":"強茂","2492":"華新科","2498":"宏達電","2603":"長榮","2609":"陽明",
+            "2610":"華航","2618":"長榮航","2801":"彰銀","2880":"華南金","2881":"富邦金","2882":"國泰金",
+            "2883":"開發金","2884":"玉山金","2885":"元大金","2886":"兆豐金","2887":"台新金","2888":"新光金",
+            "2890":"永豐金","2891":"中信金","2892":"第一金","3008":"大立光","3034":"聯詠","3036":"文曄",
+            "3045":"台灣大","3105":"穩懋","3189":"景碩","3231":"緯創","3324":"雙鴻","3481":"群創",
+            "3502":"富采","3529":"力旺","3661":"世芯-KY","3711":"日月光投控","4904":"遠傳","4938":"和碩",
+            "5347":"世界","5871":"中租-KY","5876":"上海商銀","5880":"合庫金","6138":"聯亞","6505":"台塑化",
+            "6669":"緯穎","6770":"力積電","8086":"宏捷科","2455":"全新","9904":"寶成","9921":"巨大",
+        }
+        db = {k:(v,'TW') for k,v in db.items()}
+        # 上櫃補充
+        otc_extra = {
+            "8086":("宏捷科","TWO"),"6138":("聯亞","TWO"),"4966":("譜瑞-KY","TWO"),
+            "3529":("力旺","TWO"),"6278":("台表科","TWO"),"5269":("祥碩","TWO"),
+            "6415":("矽力-KY","TWO"),"6547":("高端疫苗","TWO"),"3661":("世芯-KY","TWO"),
+            "4927":("泰鼎-KY","TWO"),"3533":("嘉澤","TWO"),
+        }
+        db.update(otc_extra)
     return db
 
 STOCK_DB = load_stock_db()
 
 def get_name(code):
-    return STOCK_DB.get(code, ("",""))[0]
+    v = STOCK_DB.get(code, ("",""))
+    return v[0] if isinstance(v, tuple) else v
 
 def get_suffix(code):
-    return STOCK_DB.get(code, ("","TW"))[1]
+    v = STOCK_DB.get(code, ("","TW"))
+    return v[1] if isinstance(v, tuple) else "TW"
 
 def search_stocks(query):
     q = query.strip()
     if not q: return []
     out = []
-    for code,(name,sfx) in STOCK_DB.items():
+    for code, val in STOCK_DB.items():
+        name = val[0] if isinstance(val, tuple) else val
+        sfx  = val[1] if isinstance(val, tuple) else "TW"
         if code.startswith(q) or q in name:
             out.append((code, name, sfx))
     out.sort(key=lambda x:(not x[0].startswith(q), x[0]))
@@ -98,7 +132,7 @@ def resolve(raw):
         return code + '.' + sfx
     return code
 
-# ── Header ───────────────────────────────────────────────
+# ── Header ──────────────────────────────────────────────
 st.markdown("""<div class="main-header">
   <h1>📈 台股均線分析站</h1>
   <p>支援中文名稱搜尋・自動辨識上市/上櫃・即時查看 MA5 / MA10 / MA20 均線強弱</p>
@@ -144,15 +178,13 @@ def analyze(code_raw, period):
 # ── Sidebar ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown('<div class="section-title">🔍 搜尋股票</div>', unsafe_allow_html=True)
-    db_count = len(STOCK_DB)
-    st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:8px">資料庫：{db_count} 檔股票</div>', unsafe_allow_html=True)
-
+    db_n = len(STOCK_DB)
+    st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:8px">資料庫：{db_n} 檔股票</div>', unsafe_allow_html=True)
     search_q = st.text_input("", placeholder="輸入代碼或中文名稱，如：台積電 / 8086", label_visibility="collapsed")
-
     if search_q.strip():
         hits = search_stocks(search_q)
         if hits:
-            st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:6px">找到 {len(hits)} 筆（點擊 ＋ 加入清單）</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:6px">找到 {len(hits)} 筆（點 ＋ 加入清單）</div>', unsafe_allow_html=True)
             if 'wl' not in st.session_state: st.session_state.wl=[]
             for code,name,sfx in hits:
                 c1,c2=st.columns([5,1])
@@ -160,7 +192,7 @@ with st.sidebar:
                 with c1:
                     st.markdown(f'<div class="hit-item"><span class="hit-code">{code}</span><span class="hit-name">{name}</span><span class="hit-mkt">{mkt}</span></div>', unsafe_allow_html=True)
                 with c2:
-                    if st.button("＋", key=f"a_{code}"):
+                    if st.button("＋",key=f"a_{code}"):
                         if code not in st.session_state.wl:
                             st.session_state.wl.append(code); st.rerun()
         else:
@@ -169,7 +201,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown('<div class="section-title">📋 查詢清單</div>', unsafe_allow_html=True)
     if 'wl' not in st.session_state: st.session_state.wl=['8086','2455','6138','2330']
-
     rm=None
     for code in st.session_state.wl:
         name=get_name(code)
@@ -177,10 +208,10 @@ with st.sidebar:
         with c1:
             st.markdown(f'<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 12px;margin:2px 0"><span style="color:#58a6ff;font-weight:700">{code}</span><span style="color:#8b949e;font-size:.83rem;margin-left:8px">{name}</span></div>', unsafe_allow_html=True)
         with c2:
-            if st.button("✕", key=f"r_{code}"): rm=code
+            if st.button("✕",key=f"r_{code}"): rm=code
     if rm: st.session_state.wl.remove(rm); st.rerun()
 
-    manual=st.text_input("手動輸入代碼（Enter 加入）", placeholder="如：2330", key="mi")
+    manual=st.text_input("手動輸入代碼（Enter 加入）",placeholder="如：2330",key="mi")
     if manual.strip():
         c=manual.strip().split('.')[0]
         if c not in st.session_state.wl: st.session_state.wl.append(c); st.rerun()
@@ -188,7 +219,7 @@ with st.sidebar:
     st.markdown("---")
     period=st.selectbox("查詢區間",["30d","60d","90d","180d","1y"],index=1,
         format_func=lambda x:{"30d":"近30天","60d":"近60天","90d":"近90天","180d":"近半年","1y":"近1年"}[x])
-    run=st.button("🔍  開始分析", use_container_width=True)
+    run=st.button("🔍  開始分析",use_container_width=True)
 
 # ── Main ────────────────────────────────────────────────
 if run and st.session_state.wl:
@@ -196,7 +227,7 @@ if run and st.session_state.wl:
     bar=st.progress(0,text="資料下載中…")
     for i,code in enumerate(st.session_state.wl):
         n=get_name(code)
-        bar.progress((i+1)/len(st.session_state.wl), text=f"正在分析 {code} {n}…")
+        bar.progress((i+1)/len(st.session_state.wl),text=f"正在分析 {code} {n}…")
         row,df,err=analyze(code,period)
         if row: results.append(row); dfs[code]=df
         if err:  errors.append(err)
@@ -274,11 +305,9 @@ padding:32px;text-align:center;margin-top:16px">
   <div style="color:#58a6ff;font-size:1.2rem;font-weight:700;margin:12px 0 8px">
     用左側搜尋框輸入中文股名或代碼</div>
   <div style="color:#8b949e">加入查詢清單後按「開始分析」</div>
-</div><br>
-<div class="section-title">🔥 熱門股票</div>""", unsafe_allow_html=True)
-    pop=[("2330","台積電"),("2317","鴻海"),("2454","聯發科"),
-         ("2303","聯電"),("2382","廣達"),("3008","大立光"),
-         ("8086","宏捷科"),("2455","全新"),("6138","聯亞")]
+</div><br><div class="section-title">🔥 熱門股票</div>""", unsafe_allow_html=True)
+    pop=[("2330","台積電"),("2317","鴻海"),("2454","聯發科"),("2303","聯電"),("2382","廣達"),
+         ("3008","大立光"),("8086","宏捷科"),("2455","全新"),("6138","聯亞")]
     cols=st.columns(3)
     for i,(code,name) in enumerate(pop):
         with cols[i%3]:
