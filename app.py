@@ -30,6 +30,9 @@ def analyze_stock(ticker, period):
         df = yf.download(ticker, period=period, progress=False, auto_adjust=True)
         if df.empty or len(df) < 20:
             return None, None, f"{ticker}：資料不足（需至少20個交易日）"
+        # Flatten MultiIndex columns if present (yfinance new version)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
         df['MA5'] = df['Close'].rolling(5).mean()
         df['MA10'] = df['Close'].rolling(10).mean()
         df['MA20'] = df['Close'].rolling(20).mean()
