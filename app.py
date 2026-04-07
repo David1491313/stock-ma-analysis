@@ -25,20 +25,30 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**使用說明**\n- 上市股票：代碼 + `.TW`\n- 上櫃股票：代碼 + `.TWO`\n- 可同時分析多檔股票")
 
+def get_close_series(df):
+    """Handle both flat and MultiIndex columns from yfinance."""
+    if isinstance(df.columns, pd.MultiIndex):
+        # New yfinance: columns like ('Close', 'AAPL')
+        close_cols = [c for c in df.columns if c[0] == 'Close']
+        if close_cols:
+            return df[close_cols[0]]
+        # Try getting just the first level
+        df.columns = df.columns.get_level_values(0)
+    return df['Close']
+
 def analyze_stock(ticker, period):
     try:
         df = yf.download(ticker, period=period, progress=False, auto_adjust=True)
         if df.empty or len(df) < 20:
             return None, None, f"{ticker}：資料不足（需至少20個交易日）"
-        # Flatten MultiIndex columns if present (yfinance new version)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df['MA5'] = df['Close'].rolling(5).mean()
-        df['MA10'] = df['Close'].rolling(10).mean()
-        df['MA20'] = df['Close'].rolling(20).mean()
-        df = df.dropna()
-        latest = df.iloc[-1]
-        close = float(latest['Close'])
+        close = get_close_series(df)
+        df2 = pd.DataFrame({'Close': close})
+        df2['MA5'] = df2['Close'].rolling(5).mean()
+        df2['MA10'] = df2['Close'].rolling(10).mean()
+        df2['MA20'] = df2['Close'].rolling(20).mean()
+        df2 = df2.dropna()
+        latest = df2.iloc[-1]
+        c = float(latest['Close'])
         ma5 = float(latest['MA5'])
         ma10 = float(latest['MA10'])
         ma20 = float(latest['MA20'])
@@ -48,15 +58,15 @@ def analyze_stock(ticker, period):
             return f"{emoji} {'站上' if p > m else '跌破'} {arrow} ({(p-m)/m*100:+.2f}%)"
         row = {
             '股票': ticker,
-            '最新收盤': round(close, 2),
+            '最新收盤': round(c, 2),
             'MA5': round(ma5, 2),
             'MA10': round(ma10, 2),
             'MA20': round(ma20, 2),
-            'vs MA5': status(close, ma5),
-            'vs MA10': status(close, ma10),
-            'vs MA20': status(close, ma20),
+            'vs MA5': status(c, ma5),
+            'vs MA10': status(c, ma10),
+            'vs MA20': status(c, ma20),
         }
-        return row, df, None
+        return row, df2, None
     except Exception as e:
         return None, None, f"{ticker}：{e}"
 
