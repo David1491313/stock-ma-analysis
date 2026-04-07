@@ -26,13 +26,10 @@ with st.sidebar:
     st.markdown("**使用說明**\n- 上市股票：代碼 + `.TW`\n- 上櫃股票：代碼 + `.TWO`\n- 可同時分析多檔股票")
 
 def get_close_series(df):
-    """Handle both flat and MultiIndex columns from yfinance."""
     if isinstance(df.columns, pd.MultiIndex):
-        # New yfinance: columns like ('Close', 'AAPL')
         close_cols = [c for c in df.columns if c[0] == 'Close']
         if close_cols:
             return df[close_cols[0]]
-        # Try getting just the first level
         df.columns = df.columns.get_level_values(0)
     return df['Close']
 
@@ -70,6 +67,14 @@ def analyze_stock(ticker, period):
     except Exception as e:
         return None, None, f"{ticker}：{e}"
 
+def color_cell(val):
+    if isinstance(val, str):
+        if '站上' in val:
+            return 'color: green; font-weight: bold'
+        if '跌破' in val:
+            return 'color: red; font-weight: bold'
+    return ''
+
 if run:
     raw = tickers_input.replace('\n', ',')
     STOCKS = [t.strip() for t in raw.split(',') if t.strip()]
@@ -95,16 +100,10 @@ if run:
         if results:
             st.subheader("📊 均線分析結果")
             df_out = pd.DataFrame(results)
-
-            def color_cell(val):
-                if isinstance(val, str):
-                    if '站上' in val:
-                        return 'color: green; font-weight: bold'
-                    if '跌破' in val:
-                        return 'color: red; font-weight: bold'
-                return ''
-
-            styled = df_out.style.applymap(color_cell, subset=['vs MA5', 'vs MA10', 'vs MA20'])
+            try:
+                styled = df_out.style.map(color_cell, subset=['vs MA5', 'vs MA10', 'vs MA20'])
+            except AttributeError:
+                styled = df_out.style.applymap(color_cell, subset=['vs MA5', 'vs MA10', 'vs MA20'])
             st.dataframe(styled, use_container_width=True, hide_index=True)
 
             st.subheader("📋 強弱總結")
