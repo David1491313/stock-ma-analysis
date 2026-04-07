@@ -108,17 +108,17 @@ if run:
                     tag = "❌ 三線全跌破（弱勢）"
                     color = "🔴"
                 else:
-                    tag = f"⚡ {cnt}/3 線站上（整理中）"
+                    tag = "⚡ " + str(cnt) + "/3 線站上（整理中）"
                     color = "🟡"
                 with cols_summary[i]:
                     st.metric(
-                        label=f"{color} {r['股票']}",
-                        value=f"{r['最新收盤']:.2f}",
+                        label=color + " " + r['股票'],
+                        value=str(round(r['最新收盤'], 2)),
                         delta=tag,
                         delta_color="off"
                     )
 
-            st.subheader(f"📉 均線走勢圖（近 {{period}}）")
+            st.subheader("📉 均線走勢圖（近 " + period + "）")
             n = len(dfs)
             cols_n = min(2, n)
             rows_n = (n + cols_n - 1) // cols_n
@@ -138,7 +138,7 @@ if run:
                 ax.plot(df.index, df['MA20'], label='MA20', color='#E91E63', lw=1.3, ls='--')
                 lc = float(df['Close'].iloc[-1])
                 ax.scatter(df.index[-1], lc, color='black', zorder=5, s=60)
-                ax.annotate(f'{{lc:.2f}}', (df.index[-1], lc),
+                ax.annotate(str(round(lc, 2)), (df.index[-1], lc),
                             xytext=(6, 4), textcoords='offset points', fontsize=9)
                 ax.set_title(t, fontsize=13, fontweight='bold')
                 ax.legend(fontsize=9)
@@ -159,4 +159,4 @@ else:
     }
     cols = st.columns(3)
     for idx, (name, code) in enumerate(examples.items()):
-        cols[idx % 3].code(f"{{name}}: {{code}}")
+        cols[idx % 3].code(name + ": " + code)
