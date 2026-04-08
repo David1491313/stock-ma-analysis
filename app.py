@@ -21,7 +21,7 @@ section[data-testid="stSidebar"] *{color:#e6edf3 !important;}
 .stock-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px 20px;margin-bottom:14px;}
 .ticker{color:#58a6ff;font-size:1.1rem;font-weight:700;}
 .sname{color:#e6edf3;font-size:.9rem;margin-left:6px;}
-.group-badge{background:#1c2128;color:#a5d6ff;font-size:.73rem;border:1px solid #1f6feb44;border-radius:4px;padding:2px 8px;margin-left:8px;vertical-align:middle;}
+.group-badge{background:#1c2a3a;color:#a5d6ff;font-size:.73rem;border:1px solid #1f6feb44;border-radius:4px;padding:2px 8px;margin-left:8px;vertical-align:middle;}
 .price{color:#e6edf3;font-size:2rem;font-weight:700;margin:4px 0;}
 .tag-up{background:#1a3a2a;color:#3fb950;border:1px solid #238636;border-radius:6px;padding:3px 10px;font-size:.82rem;font-weight:600;display:inline-block;}
 .tag-down{background:#3a1a1a;color:#f85149;border:1px solid #da3633;border-radius:6px;padding:3px 10px;font-size:.82rem;font-weight:600;display:inline-block;}
@@ -43,6 +43,8 @@ section[data-testid="stSidebar"] *{color:#e6edf3 !important;}
 .hit-mkt{color:#8b949e;font-size:.72rem;background:#21262d;padding:2px 6px;border-radius:4px;}
 .stTextInput input{background:#161b22 !important;color:#e6edf3 !important;border:1px solid #30363d !important;border-radius:8px !important;font-size:1rem !important;}
 .stTextInput input:focus{border-color:#1f6feb !important;}
+.stForm{border:none !important;padding:0 !important;}
+div[data-testid="stForm"]{border:none !important;padding:0 !important;}
 .stSelectbox>div>div{background:#161b22 !important;border:1px solid #30363d !important;color:#e6edf3 !important;}
 .stButton button{background:linear-gradient(135deg,#1f6feb,#388bfd) !important;color:#fff !important;border:none !important;border-radius:8px !important;font-size:1rem !important;font-weight:700 !important;padding:10px 0 !important;}
 .stButton button:hover{opacity:.88 !important;}
@@ -63,19 +65,18 @@ def load_stock_db():
             name   = getattr(stock, 'name',   '') or ''
             market = getattr(stock, 'market', '') or ''
             group  = getattr(stock, 'group',  '') or ''
-            sfx = 'TW' if ('上市' in market or market == 'TWSE') else                   'TWO' if ('上櫃' in market or market in ('OTC','TPEx')) else 'TW'
+            sfx = 'TW'  if ('上市' in market or market == 'TWSE') else                   'TWO' if ('上櫃' in market or market in ('OTC','TPEx')) else 'TW'
             db[code] = (name, sfx, group)
     except Exception:
         pass
     if not db:
         db = {
-            "2330":("台積電","TW","半導體業"), "2317":("鴻海","TW","電子零組件業"),
-            "2454":("聯發科","TW","半導體業"), "2303":("聯電","TW","半導體業"),
-            "2382":("廣達","TW","電腦及週邊設備業"), "3008":("大立光","TW","光電業"),
-            "2412":("中華電","TW","通信網路業"), "2881":("富邦金","TW","金融保險業"),
-            "2882":("國泰金","TW","金融保險業"), "2603":("長榮","TW","航運業"),
-            "8086":("宏捷科","TWO","半導體業"), "2455":("全新","TWO","半導體業"),
-            "6138":("聯亞","TWO","半導體業"),
+            "2330":("台積電","TW","半導體業"),"2317":("鴻海","TW","電子零組件業"),
+            "2454":("聯發科","TW","半導體業"),"2303":("聯電","TW","半導體業"),
+            "2382":("廣達","TW","電腦及週邊設備業"),"3008":("大立光","TW","光電業"),
+            "2412":("中華電","TW","通信網路業"),"2881":("富邦金","TW","金融保險業"),
+            "2603":("長榮","TW","航運業"),"8086":("宏捷科","TWO","半導體業"),
+            "2455":("全新","TWO","半導體業"),"6138":("聯亞","TWO","半導體業"),
         }
     return db
 
@@ -83,11 +84,10 @@ STOCK_DB = load_stock_db()
 
 def get_info(code):
     v = STOCK_DB.get(code, ("","TW",""))
-    return (v[0], v[1], v[2]) if isinstance(v, tuple) and len(v)==3 else (v,"TW","")
+    return (v[0],v[1],v[2]) if isinstance(v,tuple) and len(v)==3 else (str(v),"TW","")
 
 def get_name(code):   return get_info(code)[0]
 def get_suffix(code): return get_info(code)[1]
-def get_group(code):  return get_info(code)[2]
 
 def search_stocks(query):
     q = query.strip()
@@ -109,13 +109,11 @@ def resolve(raw):
         return code + '.' + (get_suffix(code) or "TW")
     return code
 
-# ── Session state init ───────────────────────────────────
+# ── Session state ────────────────────────────────────────
 if 'wl' not in st.session_state:
     st.session_state.wl = ['8086','2455','6138','2330']
 if 'do_analyze' not in st.session_state:
     st.session_state.do_analyze = False
-if 'period' not in st.session_state:
-    st.session_state.period = '60d'
 
 # ── Header ──────────────────────────────────────────────
 st.markdown("""<div class="main-header">
@@ -148,7 +146,7 @@ def analyze(code_raw, period):
         pct = lambda p,m: (p-m)/m*100
         arr = lambda p,m: "▲" if p>m else "▼"
         code_c = code_raw.split('.')[0].upper()
-        sname, _, grp = get_info(code_c) if code_c.isdigit() else ("","TW","")
+        sname,_,grp = get_info(code_c) if code_c.isdigit() else ("","TW","")
         row = {
             '_code':code_c,'_ticker':ticker,'_sname':sname,'_group':grp,
             '_close':c,'_m5':m5,'_m10':m10,'_m20':m20,
@@ -178,10 +176,11 @@ with st.sidebar:
                 mkt = "上市" if sfx=="TW" else "上櫃"
                 grp_html = f'<span class="hit-group">🏭 {group}</span>' if group else ''
                 with c1:
-                    st.markdown(f'<div class="hit-item"><span class="hit-code">{code}</span>'
-                                f'<span class="hit-name">{name}</span>'
-                                f'{grp_html}<span class="hit-mkt">{mkt}</span></div>',
-                                unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div class="hit-item"><span class="hit-code">{code}</span>'
+                        f'<span class="hit-name">{name}</span>'
+                        f'{grp_html}<span class="hit-mkt">{mkt}</span></div>',
+                        unsafe_allow_html=True)
                 with c2:
                     if st.button("＋", key=f"a_{code}"):
                         if code not in st.session_state.wl:
@@ -195,8 +194,8 @@ with st.sidebar:
     st.markdown('<div class="section-title">📋 查詢清單</div>', unsafe_allow_html=True)
     rm = None
     for code in st.session_state.wl:
-        name, _, grp = get_info(code)
-        c1, c2 = st.columns([5,1])
+        name,_,grp = get_info(code)
+        c1,c2 = st.columns([5,1])
         with c1:
             grp_txt = f' · <span style="color:#a5d6ff;font-size:.72rem">{grp}</span>' if grp else ''
             st.markdown(
@@ -213,19 +212,16 @@ with st.sidebar:
         st.session_state.wl.remove(rm)
         st.rerun()
 
-    # 手動輸入：Enter 加入並分析
-    # 用 on_change callback 來捕捉 Enter
-    def _on_manual_change():
-        val = st.session_state.get('mi_input','').strip()
-        if val:
-            c = val.split('.')[0]
+    # ── Enter 加入並分析：用 st.form 確保 Enter 能提交 ──
+    with st.form(key="add_form", clear_on_submit=True):
+        manual = st.text_input("手動輸入代碼（Enter 加入並分析）",
+                               placeholder="如：2330", label_visibility="visible")
+        submitted = st.form_submit_button("＋ 加入並分析", use_container_width=True)
+        if submitted and manual.strip():
+            c = manual.strip().split('.')[0]
             if c not in st.session_state.wl:
                 st.session_state.wl.append(c)
             st.session_state.do_analyze = True
-            st.session_state['mi_input'] = ''   # 清空
-
-    st.text_input("手動輸入代碼（Enter 加入並分析）", placeholder="如：2330",
-                  key="mi_input", on_change=_on_manual_change)
 
     st.markdown("---")
     period_map = {"30d":"近30天","60d":"近60天","90d":"近90天","180d":"近半年","1y":"近1年"}
@@ -235,7 +231,7 @@ with st.sidebar:
     if st.button("🔍 開始分析", use_container_width=True):
         st.session_state.do_analyze = True
 
-# ── 取出 flag ─────────────────────────────────────────────
+# ── 取出並重置 flag ───────────────────────────────────────
 do_run = st.session_state.do_analyze
 if do_run:
     st.session_state.do_analyze = False
@@ -254,7 +250,9 @@ if do_run and st.session_state.wl:
 
     if errors:
         for e in errors:
-            st.markdown(f'<div style="background:#3a1a1a;border:1px solid #da3633;border-radius:8px;padding:10px 14px;color:#f85149;margin:6px 0">⚠️ {e}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background:#3a1a1a;border:1px solid #da3633;border-radius:8px;'
+                        f'padding:10px 14px;color:#f85149;margin:6px 0">⚠️ {e}</div>',
+                        unsafe_allow_html=True)
 
     if results:
         st.markdown('<div class="section-title">📊 均線強弱總覽</div>', unsafe_allow_html=True)
@@ -305,7 +303,7 @@ if do_run and st.session_state.wl:
             'text.color':'#e6edf3','legend.facecolor':'#1c2128',
             'legend.edgecolor':'#30363d','font.family':'DejaVu Sans'})
         n = len(dfs); cn = min(2,n); rn = (n+cn-1)//cn
-        fig, axes = plt.subplots(rn, cn, figsize=(16, 5*rn))
+        fig,axes = plt.subplots(rn, cn, figsize=(16,5*rn))
         if n==1: axes=[axes]
         elif rn==1: axes=list(axes)
         else: axes=[ax for ra in axes for ax in ra]
@@ -319,7 +317,7 @@ if do_run and st.session_state.wl:
             lc = float(df['Close'].iloc[-1])
             ax.scatter(df.index[-1],lc,color='#f0f6fc',s=55,zorder=5)
             ax.annotate(f' {lc:.1f}',(df.index[-1],lc),color='#f0f6fc',fontsize=9,va='center')
-            sn, _, grp = get_info(code)
+            sn,_,grp = get_info(code)
             title_grp = f'  [{grp}]' if grp else ''
             ax.set_title(f"{code} {sn}{title_grp}",color='#58a6ff',fontsize=12,fontweight='bold',pad=8)
             ax.legend(fontsize=8,ncol=4,loc='upper left')
@@ -338,7 +336,7 @@ padding:32px;text-align:center;margin-top:16px">
   <div style="font-size:3rem">📊</div>
   <div style="color:#58a6ff;font-size:1.2rem;font-weight:700;margin:12px 0 8px">
     左側搜尋股票後點 ＋ 即可自動開始分析</div>
-  <div style="color:#8b949e">或手動輸入代碼按 Enter・點擊「開始分析」</div>
+  <div style="color:#8b949e">或在輸入框輸入代碼按 Enter・點擊「開始分析」</div>
 </div><br><div class="section-title">🔥 熱門股票</div>""", unsafe_allow_html=True)
     pop=[("2330","台積電","半導體業"),("2317","鴻海","電子零組件業"),("2454","聯發科","半導體業"),
          ("2303","聯電","半導體業"),("2382","廣達","電腦及週邊設備業"),("3008","大立光","光電業"),
@@ -350,5 +348,5 @@ padding:32px;text-align:center;margin-top:16px">
 border-radius:8px;padding:12px 16px;margin-bottom:10px">
 <span style="color:#58a6ff;font-weight:700">{code}</span>
 <span style="color:#e6edf3;font-size:.88rem;margin-left:8px">{name}</span>
-<span style="color:#a5d6ff;font-size:.75rem;background:#1c2a3a;border-radius:3px;padding:1px 6px;margin-left:6px">🏭 {grp}</span>
+<span style="display:block;color:#a5d6ff;font-size:.75rem;margin-top:4px">🏭 {grp}</span>
 </div>""", unsafe_allow_html=True)
