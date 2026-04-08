@@ -54,14 +54,11 @@ def load_stock_db():
     db = {}
     try:
         import twstock
-        # twstock.codes 是完整的台股代碼字典
         for code, stock in twstock.codes.items():
             if not code.isdigit():
                 continue
             name = getattr(stock, 'name', '') or ''
             market = getattr(stock, 'market', '') or ''
-            group = getattr(stock, 'group', '') or ''
-            # 判斷上市/上櫃
             if '上市' in market or market == 'TWSE':
                 sfx = 'TW'
             elif '上櫃' in market or market == 'OTC' or market == 'TPEx':
@@ -72,32 +69,26 @@ def load_stock_db():
     except Exception:
         pass
 
-    # Fallback 內建核心清單（當 twstock 不可用時）
     if not db:
         db = {
-            "1101":"台泥","1102":"亞泥","1103":"嘉泥","1216":"統一","1301":"台塑","1303":"南亞","1326":"台化",
-            "2002":"中鋼","2201":"裕隆","2207":"和泰車","2301":"光寶科","2302":"麗正","2303":"聯電",
-            "2308":"台達電","2312":"金寶","2317":"鴻海","2324":"仁寶","2327":"國巨","2330":"台積電",
-            "2344":"華邦電","2345":"智邦","2347":"聯強","2352":"佳世達","2353":"宏碁","2357":"華碩",
-            "2376":"技嘉","2377":"微星","2379":"瑞昱","2382":"廣達","2383":"台光電","2385":"群光",
-            "2395":"研華","2408":"南亞科","2409":"友達","2412":"中華電","2421":"建準","2439":"美律",
-            "2448":"晶電","2449":"京元電子","2451":"創見","2454":"聯發科","2455":"全新","2456":"奇力新",
-            "2474":"可成","2481":"強茂","2492":"華新科","2498":"宏達電","2603":"長榮","2609":"陽明",
-            "2610":"華航","2618":"長榮航","2801":"彰銀","2880":"華南金","2881":"富邦金","2882":"國泰金",
-            "2883":"開發金","2884":"玉山金","2885":"元大金","2886":"兆豐金","2887":"台新金","2888":"新光金",
-            "2890":"永豐金","2891":"中信金","2892":"第一金","3008":"大立光","3034":"聯詠","3036":"文曄",
-            "3045":"台灣大","3105":"穩懋","3189":"景碩","3231":"緯創","3324":"雙鴻","3481":"群創",
-            "3502":"富采","3529":"力旺","3661":"世芯-KY","3711":"日月光投控","4904":"遠傳","4938":"和碩",
-            "5347":"世界","5871":"中租-KY","5876":"上海商銀","5880":"合庫金","6138":"聯亞","6505":"台塑化",
-            "6669":"緯穎","6770":"力積電","8086":"宏捷科","2455":"全新","9904":"寶成","9921":"巨大",
+            "1101":"台泥","1102":"亞泥","1216":"統一","1301":"台塑","1303":"南亞","1326":"台化",
+            "2002":"中鋼","2207":"和泰車","2301":"光寶科","2303":"聯電","2308":"台達電",
+            "2317":"鴻海","2324":"仁寶","2327":"國巨","2330":"台積電","2344":"華邦電",
+            "2345":"智邦","2347":"聯強","2353":"宏碁","2357":"華碩","2376":"技嘉",
+            "2377":"微星","2379":"瑞昱","2382":"廣達","2395":"研華","2408":"南亞科",
+            "2409":"友達","2412":"中華電","2454":"聯發科","2474":"可成","2603":"長榮",
+            "2609":"陽明","2610":"華航","2618":"長榮航","2801":"彰銀","2880":"華南金",
+            "2881":"富邦金","2882":"國泰金","2884":"玉山金","2885":"元大金","2886":"兆豐金",
+            "2887":"台新金","2891":"中信金","2892":"第一金","3008":"大立光","3034":"聯詠",
+            "3045":"台灣大","3231":"緯創","3481":"群創","3711":"日月光投控","4904":"遠傳",
+            "4938":"和碩","5880":"合庫金","6505":"台塑化","6669":"緯穎","9904":"寶成","9921":"巨大",
         }
         db = {k:(v,'TW') for k,v in db.items()}
-        # 上櫃補充
         otc_extra = {
             "8086":("宏捷科","TWO"),"6138":("聯亞","TWO"),"4966":("譜瑞-KY","TWO"),
             "3529":("力旺","TWO"),"6278":("台表科","TWO"),"5269":("祥碩","TWO"),
             "6415":("矽力-KY","TWO"),"6547":("高端疫苗","TWO"),"3661":("世芯-KY","TWO"),
-            "4927":("泰鼎-KY","TWO"),"3533":("嘉澤","TWO"),
+            "4927":("泰鼎-KY","TWO"),"3533":("嘉澤","TWO"),"2455":("全新","TWO"),
         }
         db.update(otc_extra)
     return db
@@ -121,7 +112,19 @@ def search_stocks(query):
         sfx  = val[1] if isinstance(val, tuple) else "TW"
         if code.startswith(q) or q in name:
             out.append((code, name, sfx))
-    out.sort(key=lambda x:(not x[0].startswith(q), x[0]))
+    # Sort priority:
+    # 1. Exact code match (code == q)
+    # 2. Exact name match (name == q)
+    # 3. 4-digit stocks before longer ETF/bond codes
+    # 4. Code starts with query
+    # 5. Alphabetical by code
+    out.sort(key=lambda x: (
+        x[0] != q,              # exact code match first
+        x[1] != q,              # exact name match second
+        len(x[0]) > 4,          # 4-digit codes (stocks) before 5/6-digit (ETFs)
+        not x[0].startswith(q), # code prefix match before name-only match
+        x[0],                   # alphabetical by code
+    ))
     return out[:20]
 
 def resolve(raw):
@@ -168,7 +171,7 @@ def analyze(code_raw, period):
              '_close':c,'_m5':m5,'_m10':m10,'_m20':m20,
              '代碼':code_c,'名稱':sname,'最新收盤':round(c,2),
              'MA5':round(m5,2),'MA10':round(m10,2),'MA20':round(m20,2),
-             'vs MA5': f"{'🟢 站上' if c>m5  else '🔴 跌破'} {arr(c,m5)}  ({pct(c,m5):+.2f}%)",
+             'vs MA5': f"{'🟢 站上' if c>m5 else '🔴 跌破'} {arr(c,m5)} ({pct(c,m5):+.2f}%)",
              'vs MA10':f"{'🟢 站上' if c>m10 else '🔴 跌破'} {arr(c,m10)} ({pct(c,m10):+.2f}%)",
              'vs MA20':f"{'🟢 站上' if c>m20 else '🔴 跌破'} {arr(c,m20)} ({pct(c,m20):+.2f}%)",}
         return row, d, None
@@ -219,18 +222,18 @@ with st.sidebar:
     st.markdown("---")
     period=st.selectbox("查詢區間",["30d","60d","90d","180d","1y"],index=1,
         format_func=lambda x:{"30d":"近30天","60d":"近60天","90d":"近90天","180d":"近半年","1y":"近1年"}[x])
-    run=st.button("🔍  開始分析",use_container_width=True)
+    run=st.button("🔍 開始分析",use_container_width=True)
 
 # ── Main ────────────────────────────────────────────────
 if run and st.session_state.wl:
-    results,dfs,errors=[],{},[]
+    results,dfs,errors=[],{},[],
     bar=st.progress(0,text="資料下載中…")
     for i,code in enumerate(st.session_state.wl):
         n=get_name(code)
         bar.progress((i+1)/len(st.session_state.wl),text=f"正在分析 {code} {n}…")
         row,df,err=analyze(code,period)
         if row: results.append(row); dfs[code]=df
-        if err:  errors.append(err)
+        if err: errors.append(err)
     bar.empty()
 
     if errors:
@@ -243,9 +246,9 @@ if run and st.session_state.wl:
         for i,r in enumerate(results):
             a5=r['_close']>r['_m5']; a10=r['_close']>r['_m10']; a20=r['_close']>r['_m20']
             cnt=sum([a5,a10,a20])
-            if cnt==3:   tag='<span class="tag-up">✅ 三線全站上（強勢）</span>'; bc='border-color:#238636'
+            if cnt==3: tag='<span class="tag-up">✅ 三線全站上（強勢）</span>'; bc='border-color:#238636'
             elif cnt==0: tag='<span class="tag-down">❌ 三線全跌破（弱勢）</span>'; bc='border-color:#da3633'
-            else:        tag=f'<span class="tag-mid">⚡ {cnt}/3 線站上（整理中）</span>'; bc='border-color:#9e6a03'
+            else: tag=f'<span class="tag-mid">⚡ {cnt}/3 線站上（整理中）</span>'; bc='border-color:#9e6a03'
             def chip(lb,p,m):
                 cl="ma-up" if p>m else "ma-down"
                 return f'<span class="ma-chip {cl}">{lb} {"▲" if p>m else "▼"} ({(p-m)/m*100:+.1f}%)</span>'
@@ -280,12 +283,12 @@ if run and st.session_state.wl:
         for i,(code,df) in enumerate(dfs.items()):
             ax=axes[i]
             ax.plot(df.index,df['Close'],label='收盤',color=CLR['Close'],lw=1.6,zorder=4)
-            ax.plot(df.index,df['MA5'],  label='MA5', color=CLR['MA5'],  lw=1.2,ls='--',zorder=3)
+            ax.plot(df.index,df['MA5'], label='MA5', color=CLR['MA5'], lw=1.2,ls='--',zorder=3)
             ax.plot(df.index,df['MA10'], label='MA10',color=CLR['MA10'], lw=1.2,ls='--',zorder=3)
             ax.plot(df.index,df['MA20'], label='MA20',color=CLR['MA20'], lw=1.2,ls='--',zorder=3)
             lc=float(df['Close'].iloc[-1])
             ax.scatter(df.index[-1],lc,color='#f0f6fc',s=55,zorder=5)
-            ax.annotate(f'  {lc:.1f}',(df.index[-1],lc),color='#f0f6fc',fontsize=9,va='center')
+            ax.annotate(f' {lc:.1f}',(df.index[-1],lc),color='#f0f6fc',fontsize=9,va='center')
             sn=get_name(code)
             ax.set_title(f"{code} {sn}",color='#58a6ff',fontsize=12,fontweight='bold',pad=8)
             ax.legend(fontsize=8,ncol=4,loc='upper left')
