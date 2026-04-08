@@ -36,13 +36,11 @@ section[data-testid="stSidebar"] *{color:#e6edf3 !important;}
 .data-table tr:hover td{background:#1c2128;}
 .up{color:#3fb950;font-weight:600;}.dn{color:#f85149;font-weight:600;}
 .section-title{color:#58a6ff;font-size:1.05rem;font-weight:700;border-left:3px solid #1f6feb;padding-left:10px;margin:22px 0 14px 0;}
-.hit-item{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:9px 14px;margin:3px 0;display:flex;align-items:center;gap:8px;cursor:pointer;transition:border-color .15s;}
-.hit-item:hover{border-color:#1f6feb;}
+.hit-item{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:9px 14px;margin:3px 0;display:flex;align-items:center;gap:8px;}
 .hit-code{color:#58a6ff;font-weight:700;min-width:52px;font-size:.9rem;}
 .hit-name{color:#e6edf3;font-size:.88rem;flex:1;}
 .hit-group{color:#a5d6ff;font-size:.72rem;background:#1c2a3a;padding:2px 6px;border-radius:4px;white-space:nowrap;}
 .hit-mkt{color:#8b949e;font-size:.72rem;background:#21262d;padding:2px 6px;border-radius:4px;}
-.hint-box{background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:7px 12px;font-size:.78rem;color:#8b949e;margin-top:4px;}
 .stTextInput input{background:#161b22 !important;color:#e6edf3 !important;border:1px solid #30363d !important;border-radius:8px !important;font-size:1rem !important;}
 .stTextInput input:focus{border-color:#1f6feb !important;box-shadow:0 0 0 2px #1f6feb33 !important;}
 .stSelectbox>div>div{background:#161b22 !important;border:1px solid #30363d !important;color:#e6edf3 !important;}
@@ -116,6 +114,12 @@ def resolve(raw):
 # ── Session state init ───────────────────────────────────
 if 'wl' not in st.session_state:
     st.session_state.wl = ['8086','2455','6138','2330']
+if 'do_analyze' not in st.session_state:
+    st.session_state.do_analyze = False
+if 'search_hits' not in st.session_state:
+    st.session_state.search_hits = []
+if 'search_q' not in st.session_state:
+    st.session_state.search_q = ''
 
 # ── Header ──────────────────────────────────────────────
 st.markdown("""<div class="main-header">
@@ -163,56 +167,46 @@ def analyze(code_raw, period):
         return None, None, f"{code_raw}：{e}"
 
 # ── Sidebar ─────────────────────────────────────────────
-add_code   = ""   # 要加入清單的代碼
-do_analyze = False
-
 with st.sidebar:
     st.markdown('<div class="section-title">🔍 輸入股票代碼或名稱</div>', unsafe_allow_html=True)
     st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:8px">資料庫：{len(STOCK_DB)} 檔・支援代碼 / 中文名稱</div>', unsafe_allow_html=True)
 
-    # ── 單一智慧輸入框（用 form，支援 Enter 送出）──────────
+    # ── 單一智慧輸入框 ─────────────────────────────────
     with st.form("search_form", clear_on_submit=True):
         query = st.text_input(
             "", placeholder="輸入代碼或名稱，如：2330 / 台積電 / 聯發",
             label_visibility="collapsed", key="q_input")
         submitted = st.form_submit_button("🔍 查詢 / 加入", use_container_width=True)
 
-    # ── 處理輸入 ──────────────────────────────────────────
     if submitted and query.strip():
         q = query.strip()
         hits = search_stocks(q)
-
         if q.isdigit() and len(q) <= 6:
-            # 純數字代碼 → 直接加入並觸發分析
-            add_code   = q
-            do_analyze = True
-        elif len(hits) == 1:
-            # 只有一個結果 → 直接加入並分析
-            add_code   = hits[0][0]
-            do_analyze = True
-        elif hits and hits[0][0] == q:
-            # 完全符合代碼 → 直接加入並分析
-            add_code   = hits[0][0]
-            do_analyze = True
-        elif hits:
-            # 多筆結果 → 顯示到 session 讓使用者選
-            st.session_state['search_hits']  = hits
-            st.session_state['search_query'] = q
+            # 純數字 → 直接加入並分析
+            if q not in st.session_state.wl:
+                st.session_state.wl.append(q)
+            st.session_state.search_hits = []
+            st.session_state.search_q    = ''
+            st.session_state.do_analyze  = True
+        elif hits and (len(hits)==1 or hits[0][0]==q):
+            # 唯一或完全符合 → 直接加入並分析
+            c = hits[0][0]
+            if c not in st.session_state.wl:
+                st.session_state.wl.append(c)
+            st.session_state.search_hits = []
+            st.session_state.search_q    = ''
+            st.session_state.do_analyze  = True
         else:
-            st.session_state['search_hits']  = []
-            st.session_state['search_query'] = q
+            # 多筆 → 顯示選單
+            st.session_state.search_hits = hits
+            st.session_state.search_q    = q
+            st.session_state.do_analyze  = False
 
-    # 加入代碼到清單
-    if add_code and add_code not in st.session_state.wl:
-        st.session_state.wl.append(add_code)
-
-    # ── 顯示搜尋結果（多筆時讓使用者選）────────────────────
-    hits_to_show  = st.session_state.get('search_hits', [])
-    search_q_show = st.session_state.get('search_query','')
-
-    if hits_to_show:
-        st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin:6px 0 4px">「{search_q_show}」找到 {len(hits_to_show)} 筆，點選加入：</div>', unsafe_allow_html=True)
-        for code, name, sfx, group in hits_to_show:
+    # ── 顯示搜尋結果 ───────────────────────────────────
+    if st.session_state.search_hits:
+        q_show = st.session_state.search_q
+        st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin:6px 0 4px">「{q_show}」找到 {len(st.session_state.search_hits)} 筆，點選加入：</div>', unsafe_allow_html=True)
+        for code, name, sfx, group in st.session_state.search_hits:
             c1, c2 = st.columns([5,1])
             mkt = "上市" if sfx=="TW" else "上櫃"
             grp_html = f'<span class="hit-group">🏭 {group}</span>' if group else ''
@@ -226,14 +220,14 @@ with st.sidebar:
                 if st.button("＋", key=f"a_{code}"):
                     if code not in st.session_state.wl:
                         st.session_state.wl.append(code)
-                    st.session_state['search_hits']  = []
-                    st.session_state['search_query'] = ''
-                    add_code   = code
-                    do_analyze = True
-    elif search_q_show and not hits_to_show and not add_code:
-        st.markdown(f'<div style="color:#f85149;font-size:.85rem;padding:6px">「{search_q_show}」查無結果</div>', unsafe_allow_html=True)
+                    st.session_state.search_hits = []
+                    st.session_state.search_q    = ''
+                    st.session_state.do_analyze  = True
+    elif st.session_state.search_q and not st.session_state.search_hits:
+        q_show = st.session_state.search_q
+        st.markdown(f'<div style="color:#f85149;font-size:.85rem;padding:6px">「{q_show}」查無結果</div>', unsafe_allow_html=True)
 
-    # ── 查詢清單 ───────────────────────────────────────────
+    # ── 查詢清單 ───────────────────────────────────────
     st.markdown("---")
     st.markdown('<div class="section-title">📋 查詢清單</div>', unsafe_allow_html=True)
     rm = None
@@ -261,10 +255,14 @@ with st.sidebar:
     period = st.selectbox("查詢區間", list(period_map.keys()), index=1,
                           format_func=lambda x: period_map[x])
     if st.button("🔍 開始分析", use_container_width=True):
-        do_analyze = True
+        st.session_state.do_analyze = True
+
+# ── 讀取並重置 flag ──────────────────────────────────────
+do_run = st.session_state.do_analyze
+st.session_state.do_analyze = False
 
 # ── Main ────────────────────────────────────────────────
-if do_analyze and st.session_state.wl:
+if do_run and st.session_state.wl:
     results, dfs, errors = [], {}, []
     bar = st.progress(0, text="資料下載中…")
     for i, code in enumerate(st.session_state.wl):
@@ -356,7 +354,7 @@ padding:32px;text-align:center;margin-top:16px">
   <div style="font-size:3rem">📊</div>
   <div style="color:#58a6ff;font-size:1.2rem;font-weight:700;margin:12px 0 8px">
     左側輸入代碼或中文名稱後按 Enter</div>
-  <div style="color:#8b949e;font-size:.9rem">純代碼（如 2330）→ 直接分析　中文名（如 台積電）→ 選擇後分析</div>
+  <div style="color:#8b949e;font-size:.9rem">純代碼（如 2330）→ 直接分析　　中文名（如 台積電）→ 選擇後分析</div>
 </div><br><div class="section-title">🔥 熱門股票</div>""", unsafe_allow_html=True)
     pop=[("2330","台積電","半導體業"),("2317","鴻海","電子零組件業"),("2454","聯發科","半導體業"),
          ("2303","聯電","半導體業"),("2382","廣達","電腦及週邊設備業"),("3008","大立光","光電業"),
