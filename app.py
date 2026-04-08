@@ -36,17 +36,18 @@ section[data-testid="stSidebar"] *{color:#e6edf3 !important;}
 .data-table tr:hover td{background:#1c2128;}
 .up{color:#3fb950;font-weight:600;}.dn{color:#f85149;font-weight:600;}
 .section-title{color:#58a6ff;font-size:1.05rem;font-weight:700;border-left:3px solid #1f6feb;padding-left:10px;margin:22px 0 14px 0;}
-.hit-item{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:9px 14px;margin:3px 0;display:flex;align-items:center;gap:8px;}
+.hit-item{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:9px 14px;margin:3px 0;display:flex;align-items:center;gap:8px;cursor:pointer;transition:border-color .15s;}
+.hit-item:hover{border-color:#1f6feb;}
 .hit-code{color:#58a6ff;font-weight:700;min-width:52px;font-size:.9rem;}
 .hit-name{color:#e6edf3;font-size:.88rem;flex:1;}
 .hit-group{color:#a5d6ff;font-size:.72rem;background:#1c2a3a;padding:2px 6px;border-radius:4px;white-space:nowrap;}
 .hit-mkt{color:#8b949e;font-size:.72rem;background:#21262d;padding:2px 6px;border-radius:4px;}
+.hint-box{background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:7px 12px;font-size:.78rem;color:#8b949e;margin-top:4px;}
 .stTextInput input{background:#161b22 !important;color:#e6edf3 !important;border:1px solid #30363d !important;border-radius:8px !important;font-size:1rem !important;}
-.stTextInput input:focus{border-color:#1f6feb !important;}
+.stTextInput input:focus{border-color:#1f6feb !important;box-shadow:0 0 0 2px #1f6feb33 !important;}
 .stSelectbox>div>div{background:#161b22 !important;border:1px solid #30363d !important;color:#e6edf3 !important;}
 .stButton button{background:linear-gradient(135deg,#1f6feb,#388bfd) !important;color:#fff !important;border:none !important;border-radius:8px !important;font-size:1rem !important;font-weight:700 !important;padding:10px 0 !important;}
 .stButton button:hover{opacity:.88 !important;}
-.stForm{border:none !important;}
 div[data-testid="stForm"]{border:none !important;padding:0 !important;}
 #MainMenu,footer{visibility:hidden;}
 header[data-testid="stHeader"]{background:transparent;}
@@ -162,37 +163,77 @@ def analyze(code_raw, period):
         return None, None, f"{code_raw}：{e}"
 
 # ── Sidebar ─────────────────────────────────────────────
-add_triggered = False   # 搜尋結果點 ＋ 是否觸發
-enter_code    = ""      # form submit 帶進來的代碼
+add_code   = ""   # 要加入清單的代碼
+do_analyze = False
 
 with st.sidebar:
-    st.markdown('<div class="section-title">🔍 搜尋股票</div>', unsafe_allow_html=True)
-    st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:8px">資料庫：{len(STOCK_DB)} 檔股票</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🔍 輸入股票代碼或名稱</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:8px">資料庫：{len(STOCK_DB)} 檔・支援代碼 / 中文名稱</div>', unsafe_allow_html=True)
 
-    search_q = st.text_input("", placeholder="輸入代碼或中文名稱，如：台積電 / 8086",
-                             label_visibility="collapsed", key="search_input")
-    if search_q.strip():
-        hits = search_stocks(search_q)
-        if hits:
-            st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:6px">找到 {len(hits)} 筆（點 ＋ 加入並分析）</div>', unsafe_allow_html=True)
-            for code, name, sfx, group in hits:
-                c1, c2 = st.columns([5,1])
-                mkt = "上市" if sfx=="TW" else "上櫃"
-                grp_html = f'<span class="hit-group">🏭 {group}</span>' if group else ''
-                with c1:
-                    st.markdown(
-                        f'<div class="hit-item"><span class="hit-code">{code}</span>'
-                        f'<span class="hit-name">{name}</span>'
-                        f'{grp_html}<span class="hit-mkt">{mkt}</span></div>',
-                        unsafe_allow_html=True)
-                with c2:
-                    if st.button("＋", key=f"a_{code}"):
-                        if code not in st.session_state.wl:
-                            st.session_state.wl.append(code)
-                        add_triggered = True
+    # ── 單一智慧輸入框（用 form，支援 Enter 送出）──────────
+    with st.form("search_form", clear_on_submit=True):
+        query = st.text_input(
+            "", placeholder="輸入代碼或名稱，如：2330 / 台積電 / 聯發",
+            label_visibility="collapsed", key="q_input")
+        submitted = st.form_submit_button("🔍 查詢 / 加入", use_container_width=True)
+
+    # ── 處理輸入 ──────────────────────────────────────────
+    if submitted and query.strip():
+        q = query.strip()
+        hits = search_stocks(q)
+
+        if q.isdigit() and len(q) <= 6:
+            # 純數字代碼 → 直接加入並觸發分析
+            add_code   = q
+            do_analyze = True
+        elif len(hits) == 1:
+            # 只有一個結果 → 直接加入並分析
+            add_code   = hits[0][0]
+            do_analyze = True
+        elif hits and hits[0][0] == q:
+            # 完全符合代碼 → 直接加入並分析
+            add_code   = hits[0][0]
+            do_analyze = True
+        elif hits:
+            # 多筆結果 → 顯示到 session 讓使用者選
+            st.session_state['search_hits']  = hits
+            st.session_state['search_query'] = q
         else:
-            st.markdown('<div style="color:#f85149;font-size:.85rem;padding:6px">查無結果</div>', unsafe_allow_html=True)
+            st.session_state['search_hits']  = []
+            st.session_state['search_query'] = q
 
+    # 加入代碼到清單
+    if add_code and add_code not in st.session_state.wl:
+        st.session_state.wl.append(add_code)
+
+    # ── 顯示搜尋結果（多筆時讓使用者選）────────────────────
+    hits_to_show  = st.session_state.get('search_hits', [])
+    search_q_show = st.session_state.get('search_query','')
+
+    if hits_to_show:
+        st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin:6px 0 4px">「{search_q_show}」找到 {len(hits_to_show)} 筆，點選加入：</div>', unsafe_allow_html=True)
+        for code, name, sfx, group in hits_to_show:
+            c1, c2 = st.columns([5,1])
+            mkt = "上市" if sfx=="TW" else "上櫃"
+            grp_html = f'<span class="hit-group">🏭 {group}</span>' if group else ''
+            with c1:
+                st.markdown(
+                    f'<div class="hit-item"><span class="hit-code">{code}</span>'
+                    f'<span class="hit-name">{name}</span>'
+                    f'{grp_html}<span class="hit-mkt">{mkt}</span></div>',
+                    unsafe_allow_html=True)
+            with c2:
+                if st.button("＋", key=f"a_{code}"):
+                    if code not in st.session_state.wl:
+                        st.session_state.wl.append(code)
+                    st.session_state['search_hits']  = []
+                    st.session_state['search_query'] = ''
+                    add_code   = code
+                    do_analyze = True
+    elif search_q_show and not hits_to_show and not add_code:
+        st.markdown(f'<div style="color:#f85149;font-size:.85rem;padding:6px">「{search_q_show}」查無結果</div>', unsafe_allow_html=True)
+
+    # ── 查詢清單 ───────────────────────────────────────────
     st.markdown("---")
     st.markdown('<div class="section-title">📋 查詢清單</div>', unsafe_allow_html=True)
     rm = None
@@ -215,29 +256,15 @@ with st.sidebar:
         st.session_state.wl.remove(rm)
         st.rerun()
 
-    # ── 手動輸入：用 st.form 讓 Enter 可以 submit ──
-    st.markdown("---")
-    with st.form("manual_form", clear_on_submit=True):
-        mi = st.text_input("手動輸入代碼（Enter 加入並分析）",
-                           placeholder="如：2330", label_visibility="visible")
-        submitted = st.form_submit_button("➕ 加入並分析", use_container_width=True)
-        if submitted and mi.strip():
-            c = mi.strip().split('.')[0]
-            if c not in st.session_state.wl:
-                st.session_state.wl.append(c)
-            enter_code = c
-
     st.markdown("---")
     period_map = {"30d":"近30天","60d":"近60天","90d":"近90天","180d":"近半年","1y":"近1年"}
     period = st.selectbox("查詢區間", list(period_map.keys()), index=1,
                           format_func=lambda x: period_map[x])
-    run_btn = st.button("🔍 開始分析", use_container_width=True)
-
-# ── 決定是否執行分析 ─────────────────────────────────────
-do_run = run_btn or add_triggered or bool(enter_code)
+    if st.button("🔍 開始分析", use_container_width=True):
+        do_analyze = True
 
 # ── Main ────────────────────────────────────────────────
-if do_run and st.session_state.wl:
+if do_analyze and st.session_state.wl:
     results, dfs, errors = [], {}, []
     bar = st.progress(0, text="資料下載中…")
     for i, code in enumerate(st.session_state.wl):
@@ -261,9 +288,7 @@ if do_run and st.session_state.wl:
             return f'<span class="ma-chip {cl}">{lb} {"▲" if p>m else "▼"} ({(p-m)/m*100:+.1f}%)</span>'
 
         for i, r in enumerate(results):
-            a5  = r['_close']>r['_m5']
-            a10 = r['_close']>r['_m10']
-            a20 = r['_close']>r['_m20']
+            a5=r['_close']>r['_m5']; a10=r['_close']>r['_m10']; a20=r['_close']>r['_m20']
             cnt = sum([a5,a10,a20])
             if cnt==3:   tag='<span class="tag-up">✅ 三線全站上（強勢）</span>'; bc='border-color:#238636'
             elif cnt==0: tag='<span class="tag-down">❌ 三線全跌破（弱勢）</span>'; bc='border-color:#da3633'
@@ -280,8 +305,7 @@ if do_run and st.session_state.wl:
         rh = ""
         for r in results:
             td = lambda v: f'<td class="{"up" if "站上" in v else "dn"}">{v}</td>'
-            rh += (f"<tr>"
-                   f"<td><b style='color:#58a6ff'>{r['代碼']}</b></td>"
+            rh += (f"<tr><td><b style='color:#58a6ff'>{r['代碼']}</b></td>"
                    f"<td>{r['名稱']}</td>"
                    f"<td><span style='color:#a5d6ff;font-size:.82rem'>{r['族群']}</span></td>"
                    f"<td><b>{r['最新收盤']}</b></td>"
@@ -289,8 +313,7 @@ if do_run and st.session_state.wl:
                    f"{td(r['vs MA5'])}{td(r['vs MA10'])}{td(r['vs MA20'])}</tr>")
         st.markdown(f"""<table class="data-table"><thead><tr>
 <th>代碼</th><th>名稱</th><th>族群</th><th>收盤</th><th>MA5</th><th>MA10</th><th>MA20</th>
-<th>vs MA5</th><th>vs MA10</th><th>vs MA20</th></tr></thead><tbody>{rh}</tbody></table>""",
-            unsafe_allow_html=True)
+<th>vs MA5</th><th>vs MA10</th><th>vs MA20</th></tr></thead><tbody>{rh}</tbody></table>""", unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">📉 均線走勢圖</div>', unsafe_allow_html=True)
         matplotlib.rcParams.update({
@@ -300,24 +323,23 @@ if do_run and st.session_state.wl:
             'grid.color':'#21262d','grid.linewidth':0.8,
             'text.color':'#e6edf3','legend.facecolor':'#1c2128',
             'legend.edgecolor':'#30363d','font.family':'DejaVu Sans'})
-        n = len(dfs); cn = min(2,n); rn = (n+cn-1)//cn
-        fig, axes = plt.subplots(rn, cn, figsize=(16, 5*rn))
+        n=len(dfs); cn=min(2,n); rn=(n+cn-1)//cn
+        fig,axes=plt.subplots(rn,cn,figsize=(16,5*rn))
         if n==1: axes=[axes]
         elif rn==1: axes=list(axes)
         else: axes=[ax for ra in axes for ax in ra]
-        CLR = {'Close':'#e6edf3','MA5':'#58a6ff','MA10':'#f0883e','MA20':'#bc8cff'}
+        CLR={'Close':'#e6edf3','MA5':'#58a6ff','MA10':'#f0883e','MA20':'#bc8cff'}
         for i,(code,df) in enumerate(dfs.items()):
-            ax = axes[i]
+            ax=axes[i]
             ax.plot(df.index,df['Close'],label='收盤',color=CLR['Close'],lw=1.6,zorder=4)
             ax.plot(df.index,df['MA5'],  label='MA5', color=CLR['MA5'],  lw=1.2,ls='--',zorder=3)
             ax.plot(df.index,df['MA10'], label='MA10',color=CLR['MA10'], lw=1.2,ls='--',zorder=3)
             ax.plot(df.index,df['MA20'], label='MA20',color=CLR['MA20'], lw=1.2,ls='--',zorder=3)
-            lc = float(df['Close'].iloc[-1])
+            lc=float(df['Close'].iloc[-1])
             ax.scatter(df.index[-1],lc,color='#f0f6fc',s=55,zorder=5)
             ax.annotate(f' {lc:.1f}',(df.index[-1],lc),color='#f0f6fc',fontsize=9,va='center')
-            sn, _, grp = get_info(code)
-            title_grp = f'  [{grp}]' if grp else ''
-            ax.set_title(f"{code} {sn}{title_grp}",color='#58a6ff',fontsize=12,fontweight='bold',pad=8)
+            sn,_,grp=get_info(code)
+            ax.set_title(f"{code} {sn}{'  ['+grp+']' if grp else ''}",color='#58a6ff',fontsize=12,fontweight='bold',pad=8)
             ax.legend(fontsize=8,ncol=4,loc='upper left')
             ax.grid(True,alpha=0.6)
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
@@ -333,13 +355,13 @@ else:
 padding:32px;text-align:center;margin-top:16px">
   <div style="font-size:3rem">📊</div>
   <div style="color:#58a6ff;font-size:1.2rem;font-weight:700;margin:12px 0 8px">
-    左側搜尋股票後點 ＋ 即可自動開始分析</div>
-  <div style="color:#8b949e">或在下方輸入框輸入代碼按 Enter・點擊「開始分析」</div>
+    左側輸入代碼或中文名稱後按 Enter</div>
+  <div style="color:#8b949e;font-size:.9rem">純代碼（如 2330）→ 直接分析　中文名（如 台積電）→ 選擇後分析</div>
 </div><br><div class="section-title">🔥 熱門股票</div>""", unsafe_allow_html=True)
     pop=[("2330","台積電","半導體業"),("2317","鴻海","電子零組件業"),("2454","聯發科","半導體業"),
          ("2303","聯電","半導體業"),("2382","廣達","電腦及週邊設備業"),("3008","大立光","光電業"),
          ("8086","宏捷科","半導體業"),("2455","全新","半導體業"),("6138","聯亞","半導體業")]
-    cols = st.columns(3)
+    cols=st.columns(3)
     for i,(code,name,grp) in enumerate(pop):
         with cols[i%3]:
             st.markdown(f"""<div style="background:#161b22;border:1px solid #30363d;
