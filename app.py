@@ -46,7 +46,6 @@ section[data-testid="stSidebar"] *{color:#e6edf3 !important;}
 .stSelectbox>div>div{background:#161b22 !important;border:1px solid #30363d !important;color:#e6edf3 !important;}
 .stButton button{background:linear-gradient(135deg,#1f6feb,#388bfd) !important;color:#fff !important;border:none !important;border-radius:8px !important;font-size:1rem !important;font-weight:700 !important;padding:10px 0 !important;}
 .stButton button:hover{opacity:.88 !important;}
-div[data-testid="stForm"]{border:none !important;padding:0 !important;}
 #MainMenu,footer{visibility:hidden;}
 header[data-testid="stHeader"]{background:transparent;}
 </style>
@@ -120,6 +119,8 @@ if 'search_hits' not in st.session_state:
     st.session_state.search_hits = []
 if 'search_q' not in st.session_state:
     st.session_state.search_q = ''
+if 'last_input' not in st.session_state:
+    st.session_state.last_input = ''
 
 # ── Header ──────────────────────────────────────────────
 st.markdown("""<div class="main-header">
@@ -169,38 +170,47 @@ def analyze(code_raw, period):
 # ── Sidebar ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown('<div class="section-title">🔍 輸入股票代碼或名稱</div>', unsafe_allow_html=True)
-    st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:8px">資料庫：{len(STOCK_DB)} 檔・支援代碼 / 中文名稱</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="color:#8b949e;font-size:.78rem;margin-bottom:8px">資料庫：{len(STOCK_DB)} 檔・支援代碼 / 中文名稱・Enter 送出</div>', unsafe_allow_html=True)
 
-    # ── 單一智慧輸入框 ─────────────────────────────────
-    with st.form("search_form", clear_on_submit=True):
-        query = st.text_input(
-            "", placeholder="輸入代碼或名稱，如：2330 / 台積電 / 聯發",
-            label_visibility="collapsed", key="q_input")
-        submitted = st.form_submit_button("🔍 查詢 / 加入", use_container_width=True)
+    # 單一輸入框，Enter 觸發 rerun
+    curr_input = st.text_input(
+        "", placeholder="輸入代碼或名稱，如：2330 / 台積電",
+        label_visibility="collapsed", key="unified_input")
 
-    if submitted and query.strip():
-        q = query.strip()
+    # 偵測 Enter（值有變且非空）
+    if curr_input.strip() and curr_input.strip() != st.session_state.last_input:
+        q = curr_input.strip()
+        st.session_state.last_input = q
         hits = search_stocks(q)
+
         if q.isdigit() and len(q) <= 6:
-            # 純數字 → 直接加入並分析
+            # 純數字代碼 → 直接加入並分析
             if q not in st.session_state.wl:
                 st.session_state.wl.append(q)
             st.session_state.search_hits = []
             st.session_state.search_q    = ''
             st.session_state.do_analyze  = True
-        elif hits and (len(hits)==1 or hits[0][0]==q):
-            # 唯一或完全符合 → 直接加入並分析
+        elif hits and (len(hits) == 1 or hits[0][0] == q or hits[0][1] == q):
+            # 唯一結果或完全符合 → 直接加入並分析
             c = hits[0][0]
             if c not in st.session_state.wl:
                 st.session_state.wl.append(c)
             st.session_state.search_hits = []
             st.session_state.search_q    = ''
             st.session_state.do_analyze  = True
-        else:
+        elif hits:
             # 多筆 → 顯示選單
             st.session_state.search_hits = hits
             st.session_state.search_q    = q
             st.session_state.do_analyze  = False
+        else:
+            st.session_state.search_hits = []
+            st.session_state.search_q    = q
+            st.session_state.do_analyze  = False
+
+    # 清空輸入框時重置 last_input
+    if not curr_input.strip():
+        st.session_state.last_input = ''
 
     # ── 顯示搜尋結果 ───────────────────────────────────
     if st.session_state.search_hits:
@@ -222,10 +232,10 @@ with st.sidebar:
                         st.session_state.wl.append(code)
                     st.session_state.search_hits = []
                     st.session_state.search_q    = ''
+                    st.session_state.last_input  = ''
                     st.session_state.do_analyze  = True
     elif st.session_state.search_q and not st.session_state.search_hits:
-        q_show = st.session_state.search_q
-        st.markdown(f'<div style="color:#f85149;font-size:.85rem;padding:6px">「{q_show}」查無結果</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="color:#f85149;font-size:.85rem;padding:6px">「{st.session_state.search_q}」查無結果</div>', unsafe_allow_html=True)
 
     # ── 查詢清單 ───────────────────────────────────────
     st.markdown("---")
@@ -354,7 +364,7 @@ padding:32px;text-align:center;margin-top:16px">
   <div style="font-size:3rem">📊</div>
   <div style="color:#58a6ff;font-size:1.2rem;font-weight:700;margin:12px 0 8px">
     左側輸入代碼或中文名稱後按 Enter</div>
-  <div style="color:#8b949e;font-size:.9rem">純代碼（如 2330）→ 直接分析　　中文名（如 台積電）→ 選擇後分析</div>
+  <div style="color:#8b949e;font-size:.9rem">純代碼（如 2330）→ 直接分析&nbsp;&nbsp;&nbsp;中文名（如 台積電）→ 選擇後分析</div>
 </div><br><div class="section-title">🔥 熱門股票</div>""", unsafe_allow_html=True)
     pop=[("2330","台積電","半導體業"),("2317","鴻海","電子零組件業"),("2454","聯發科","半導體業"),
          ("2303","聯電","半導體業"),("2382","廣達","電腦及週邊設備業"),("3008","大立光","光電業"),
