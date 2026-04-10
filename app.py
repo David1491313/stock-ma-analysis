@@ -205,15 +205,14 @@ def get_ohlcv(ticker_symbol, period):
 
 def make_kline_chart(df, name, code, sector, active_mas):
     df = df.copy()
-    # Keep only trading days (volume > 0)
-    df = df[df['Volume'] > 0].copy()
-    df = df.sort_index()
+    df = df[df['Volume'] > 0].sort_index()
 
     for n, _ in MA_CONFIG:
         df[f'MA{n}'] = df['Close'].rolling(n).mean()
 
-    # Use string dates so Plotly treats x as category (no date gaps)
+    # Use string dates as category labels → no weekends/holiday gaps
     x_labels = df.index.strftime('%Y-%m-%d').tolist()
+    n_total = len(x_labels)
     colors = ['#3fb950' if c >= o else '#f85149' for c, o in zip(df['Close'], df['Open'])]
 
     fig = make_subplots(
@@ -227,9 +226,7 @@ def make_kline_chart(df, name, code, sector, active_mas):
         open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         increasing=dict(line=dict(color='#3fb950'), fillcolor='#3fb950'),
         decreasing=dict(line=dict(color='#f85149'), fillcolor='#f85149'),
-        name='K線', showlegend=False,
-        xaxis='x', yaxis='y'
-    ), row=1, col=1)
+        name='K線', showlegend=False), row=1, col=1)
 
     for n, color in MA_CONFIG:
         key = f'MA{n}'
@@ -241,33 +238,32 @@ def make_kline_chart(df, name, code, sector, active_mas):
         ), row=1, col=1)
 
     fig.add_trace(go.Bar(
-        x=x_labels, y=df['Volume'],
-        marker_color=colors,
+        x=x_labels, y=df['Volume'], marker_color=colors,
         name='成交量', showlegend=False, opacity=0.8
     ), row=2, col=1)
 
-    # Range selector using tick indices instead of dates
-    n_total = len(x_labels)
-    def idx_from_months(m):
-        # approximate trading days per month = 21
-        return max(0, n_total - m * 21)
-    def idx_from_years(y):
-        return max(0, n_total - y * 252)
+    # Tick marks: show ~24 evenly spaced labels
+    step = max(1, n_total // 24)
+    tick_idxs = list(range(0, n_total, step))
+    tick_vals  = [x_labels[i] for i in tick_idxs]
+    tick_texts = [x_labels[i][:7] for i in tick_idxs]
 
-    rangeselector = dict(
-        buttons=[
-            dict(label='1M',  method='relayout', args=[{'xaxis.range': [idx_from_months(1),  n_total-1]}]),
-            dict(label='3M',  method='relayout', args=[{'xaxis.range': [idx_from_months(3),  n_total-1]}]),
-            dict(label='6M',  method='relayout', args=[{'xaxis.range': [idx_from_months(6),  n_total-1]}]),
-            dict(label='1Y',  method='relayout', args=[{'xaxis.range': [idx_from_years(1),   n_total-1]}]),
-            dict(label='2Y',  method='relayout', args=[{'xaxis.range': [idx_from_years(2),   n_total-1]}]),
-            dict(label='全部', method='relayout', args=[{'xaxis.range': [0, n_total-1]}]),
-        ],
-        bgcolor='#21262d', activecolor='#58a6ff',
-        bordercolor='#30363d', borderwidth=1,
-        font=dict(color='#e6edf3', size=11),
-        x=0, y=1.0,
-    )
+    # Range buttons: compute default view = last 1 year
+    r_1m  = x_labels[max(0, n_total - 21)]
+    r_3m  = x_labels[max(0, n_total - 63)]
+    r_6m  = x_labels[max(0, n_total - 126)]
+    r_1y  = x_labels[max(0, n_total - 252)]
+    r_2y  = x_labels[max(0, n_total - 504)]
+    r_all = x_labels[0]
+
+    range_buttons = [
+        dict(label='1M',  method='relayout', args=[{'xaxis.range': [r_1m,  x_labels[-1]]}]),
+        dict(label='3M',  method='relayout', args=[{'xaxis.range': [r_3m,  x_labels[-1]]}]),
+        dict(label='6M',  method='relayout', args=[{'xaxis.range': [r_6m,  x_labels[-1]]}]),
+        dict(label='1Y',  method='relayout', args=[{'xaxis.range': [r_1y,  x_labels[-1]]}]),
+        dict(label='2Y',  method='relayout', args=[{'xaxis.range': [r_2y,  x_labels[-1]]}]),
+        dict(label='全部', method='relayout', args=[{'xaxis.range': [r_all, x_labels[-1]]}]),
+    ]
 
     fig.update_layout(
         height=640,
@@ -276,6 +272,7 @@ def make_kline_chart(df, name, code, sector, active_mas):
         font=dict(color='#e6edf3', family='Noto Sans TC'),
         xaxis=dict(
             type='category',
+            range=[r_1y, x_labels[-1]],   # default show last 1 year
             rangeslider=dict(
                 visible=True,
                 thickness=0.05,
@@ -283,40 +280,39 @@ def make_kline_chart(df, name, code, sector, active_mas):
                 bordercolor='#30363d',
                 borderwidth=1,
             ),
-            updatemenus=[],
             gridcolor='#21262d',
             tickmode='array',
-            # Show one tick per month roughly
-            tickvals=[x_labels[i] for i in range(0, n_total, max(1, n_total//24))],
-            ticktext=[x_labels[i][:7] for i in range(0, n_total, max(1, n_total//24))],
+            tickvals=tick_vals,
+            ticktext=tick_texts,
             tickfont=dict(size=9),
-            range=[max(0, n_total-252*2-1), n_total-1],  # default show last 2 years
         ),
         xaxis2=dict(
             type='category',
             gridcolor='#21262d',
             tickmode='array',
-            tickvals=[x_labels[i] for i in range(0, n_total, max(1, n_total//24))],
-            ticktext=[x_labels[i][:7] for i in range(0, n_total, max(1, n_total//24))],
+            tickvals=tick_vals,
+            ticktext=tick_texts,
             tickfont=dict(size=9),
         ),
         updatemenus=[dict(
             type='buttons',
             direction='right',
-            x=0, y=1.08, xanchor='left',
-            bgcolor='#21262d', bordercolor='#30363d',
-            font=dict(color='#e6edf3', size=11),
-            buttons=rangeselector['buttons'],
             showactive=True,
-            active=3,  # default = 1Y (index 3)
-            pad=dict(r=5, t=0),
+            active=3,
+            x=0.0, xanchor='left',
+            y=1.10, yanchor='top',
+            bgcolor='#21262d',
+            bordercolor='#30363d',
+            font=dict(color='#e6edf3', size=11),
+            buttons=range_buttons,
+            pad=dict(r=4, t=0, b=0),
         )],
         legend=dict(
             orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
             bgcolor='rgba(0,0,0,0)', font=dict(size=12),
             itemclick='toggle', itemdoubleclick='toggleothers'
         ),
-        margin=dict(l=50, r=20, t=60, b=10),
+        margin=dict(l=50, r=20, t=65, b=10),
         hovermode='x unified',
         dragmode='zoom',
     )
