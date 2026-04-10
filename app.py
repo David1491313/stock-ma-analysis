@@ -210,9 +210,8 @@ def make_kline_chart(df, name, code, sector, active_mas):
     for n, _ in MA_CONFIG:
         df[f'MA{n}'] = df['Close'].rolling(n).mean()
 
-    # Use string dates as category labels → no weekends/holiday gaps
     x_labels = df.index.strftime('%Y-%m-%d').tolist()
-    n_total = len(x_labels)
+    n = len(x_labels)
     colors = ['#3fb950' if c >= o else '#f85149' for c, o in zip(df['Close'], df['Open'])]
 
     fig = make_subplots(
@@ -222,14 +221,14 @@ def make_kline_chart(df, name, code, sector, active_mas):
     )
 
     fig.add_trace(go.Candlestick(
-        x=x_labels,
-        open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        x=x_labels, open=df['Open'], high=df['High'],
+        low=df['Low'], close=df['Close'],
         increasing=dict(line=dict(color='#3fb950'), fillcolor='#3fb950'),
         decreasing=dict(line=dict(color='#f85149'), fillcolor='#f85149'),
         name='K線', showlegend=False), row=1, col=1)
 
-    for n, color in MA_CONFIG:
-        key = f'MA{n}'
+    for ma_n, color in MA_CONFIG:
+        key = f'MA{ma_n}'
         fig.add_trace(go.Scatter(
             x=x_labels, y=df[key], name=key,
             line=dict(color=color, width=1.5),
@@ -242,27 +241,29 @@ def make_kline_chart(df, name, code, sector, active_mas):
         name='成交量', showlegend=False, opacity=0.8
     ), row=2, col=1)
 
-    # Tick marks: show ~24 evenly spaced labels
-    step = max(1, n_total // 24)
-    tick_idxs = list(range(0, n_total, step))
-    tick_vals  = [x_labels[i] for i in tick_idxs]
-    tick_texts = [x_labels[i][:7] for i in tick_idxs]
+    # Tick marks
+    step = max(1, n // 24)
+    tick_vals  = [x_labels[i] for i in range(0, n, step)]
+    tick_texts = [x_labels[i][:7] for i in range(0, n, step)]
 
-    # Range buttons: compute default view = last 1 year
-    r_1m  = x_labels[max(0, n_total - 21)]
-    r_3m  = x_labels[max(0, n_total - 63)]
-    r_6m  = x_labels[max(0, n_total - 126)]
-    r_1y  = x_labels[max(0, n_total - 252)]
-    r_2y  = x_labels[max(0, n_total - 504)]
-    r_all = x_labels[0]
+    # For category axis, range = [start_index - 0.5, end_index + 0.5]
+    def cat_range(start_idx):
+        return [start_idx - 0.5, n - 0.5]
+
+    r_1m  = cat_range(max(0, n - 21))
+    r_3m  = cat_range(max(0, n - 63))
+    r_6m  = cat_range(max(0, n - 126))
+    r_1y  = cat_range(max(0, n - 252))
+    r_2y  = cat_range(max(0, n - 504))
+    r_all = cat_range(0)
 
     range_buttons = [
-        dict(label='1M',  method='relayout', args=[{'xaxis.range': [r_1m,  x_labels[-1]]}]),
-        dict(label='3M',  method='relayout', args=[{'xaxis.range': [r_3m,  x_labels[-1]]}]),
-        dict(label='6M',  method='relayout', args=[{'xaxis.range': [r_6m,  x_labels[-1]]}]),
-        dict(label='1Y',  method='relayout', args=[{'xaxis.range': [r_1y,  x_labels[-1]]}]),
-        dict(label='2Y',  method='relayout', args=[{'xaxis.range': [r_2y,  x_labels[-1]]}]),
-        dict(label='全部', method='relayout', args=[{'xaxis.range': [r_all, x_labels[-1]]}]),
+        dict(label='1M',  method='relayout', args=[{'xaxis.range': r_1m}]),
+        dict(label='3M',  method='relayout', args=[{'xaxis.range': r_3m}]),
+        dict(label='6M',  method='relayout', args=[{'xaxis.range': r_6m}]),
+        dict(label='1Y',  method='relayout', args=[{'xaxis.range': r_1y}]),
+        dict(label='2Y',  method='relayout', args=[{'xaxis.range': r_2y}]),
+        dict(label='全部', method='relayout', args=[{'xaxis.range': r_all}]),
     ]
 
     fig.update_layout(
@@ -272,7 +273,7 @@ def make_kline_chart(df, name, code, sector, active_mas):
         font=dict(color='#e6edf3', family='Noto Sans TC'),
         xaxis=dict(
             type='category',
-            range=[r_1y, x_labels[-1]],   # default show last 1 year
+            range=r_1y,               # ← integer index range works for category
             rangeslider=dict(
                 visible=True,
                 thickness=0.05,
