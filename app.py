@@ -193,7 +193,7 @@ MA_CONFIG = [
 
 def get_ohlcv(ticker_symbol, period):
     period_map = {"1個月":"1mo","3個月":"3mo","6個月":"6mo","1年":"1y","2年":"2y","3年":"3y"}
-    p = period_map.get(period, "6mo")
+    p = period_map.get(period, "3y")
     tk = yf.Ticker(ticker_symbol)
     df = tk.history(period=p)
     if df.empty: return None
@@ -205,13 +205,19 @@ def get_ohlcv(ticker_symbol, period):
 
 def make_kline_chart(df, name, code, sector, active_mas):
     df = df.copy()
+    # Drop rows with no volume (holidays / non-trading days)
+    df = df[df['Volume'] > 0].copy()
+
     for n, _ in MA_CONFIG:
         df[f'MA{n}'] = df['Close'].rolling(n).mean()
+
     colors = ['#3fb950' if c >= o else '#f85149' for c, o in zip(df['Close'], df['Open'])]
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02,
-                        row_heights=[0.68, 0.32],
-                        subplot_titles=(f"{name} ({code})  |  族群: {sector or 'N/A'}", "成交量"))
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02,
+        row_heights=[0.68, 0.32],
+        subplot_titles=(f"{name} ({code})  |  族群: {sector or 'N/A'}", "成交量")
+    )
 
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
@@ -221,13 +227,30 @@ def make_kline_chart(df, name, code, sector, active_mas):
 
     for n, color in MA_CONFIG:
         key = f'MA{n}'
-        fig.add_trace(go.Scatter(x=df.index, y=df[key], name=key,
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df[key], name=key,
             line=dict(color=color, width=1.5),
             visible=True if key in active_mas else 'legendonly',
-            hovertemplate='%{y:.2f}'), row=1, col=1)
+            hovertemplate='%{y:.2f}'
+        ), row=1, col=1)
 
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors,
-        name='成交量', showlegend=False, opacity=0.8), row=2, col=1)
+    fig.add_trace(go.Bar(
+        x=df.index, y=df['Volume'], marker_color=colors,
+        name='成交量', showlegend=False, opacity=0.8
+    ), row=2, col=1)
+
+    # Build list of all non-trading days to hide (weekends + holidays)
+    # Use the actual trading dates to figure out gaps > 1 day
+    dates = df.index.normalize().unique().sort_values()
+    all_days = pd.date_range(start=dates[0], end=dates[-1], freq='D')
+    missing = all_days.difference(dates)
+
+    rangebreaks = [dict(bounds=['sat', 'mon'])]   # always skip weekends
+    if len(missing) > 0:
+        # Add individual holiday breaks
+        for d in missing:
+            if d.weekday() < 5:  # weekday = not weekend → holiday
+                rangebreaks.append(dict(values=[d.strftime('%Y-%m-%d')]))
 
     rangeselector = dict(
         buttons=[
@@ -260,17 +283,24 @@ def make_kline_chart(df, name, code, sector, active_mas):
             rangeselector=rangeselector,
             type='date',
             gridcolor='#21262d',
-            rangebreaks=[dict(bounds=['sat','mon'])],
+            rangebreaks=rangebreaks,
             tickfont=dict(size=10),
         ),
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
-                    bgcolor='rgba(0,0,0,0)', font=dict(size=12),
-                    itemclick='toggle', itemdoubleclick='toggleothers'),
+        xaxis2=dict(
+            type='date',
+            gridcolor='#21262d',
+            rangebreaks=rangebreaks,
+            tickfont=dict(size=10),
+        ),
+        legend=dict(
+            orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
+            bgcolor='rgba(0,0,0,0)', font=dict(size=12),
+            itemclick='toggle', itemdoubleclick='toggleothers'
+        ),
         margin=dict(l=50, r=20, t=50, b=10),
         hovermode='x unified',
         dragmode='zoom',
     )
-    fig.update_xaxes(gridcolor='#21262d', showgrid=True, row=2, col=1)
     fig.update_yaxes(gridcolor='#21262d', showgrid=True)
     fig.update_yaxes(title_text="價格 (TWD)", row=1, col=1)
     fig.update_yaxes(title_text="成交量", row=2, col=1)
@@ -328,7 +358,7 @@ with st.sidebar:
                 st.session_state.cur_folder = list(st.session_state.folders.keys())[0]
                 save_folders(); st.rerun()
     st.markdown("---")
-    period = st.radio("📅 期間", ["1個月","3個月","6個月","1年","2年","3年"], index=2, key="period_select")
+    period = st.radio("📅 期間", ["1個月","3個月","6個月","1年","2年","3年"], index=5, key="period_select")
     st.markdown("---")
     st.markdown("**📊 均線顯示**")
     active_mas = []
