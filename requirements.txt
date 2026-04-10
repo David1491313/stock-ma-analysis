@@ -1,7 +1,7 @@
 streamlit
 yfinance
 pandas
-matplotlib
+plotly
 requests
 lxml
 twstock
