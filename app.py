@@ -34,11 +34,10 @@ html, body, [class*="css"] { font-family: 'Noto Sans TC', sans-serif; background
 .stTextInput input { background:#161b22 !important; color:#e6edf3 !important; border:1px solid #30363d !important; border-radius:8px !important; }
 .stSelectbox div { background:#161b22 !important; color:#e6edf3 !important; }
 section[data-testid="stSidebar"] { background:#161b22 !important; border-right:1px solid #30363d; }
-.folder-btn { width:100%; text-align:left; background:#21262d; border:1px solid #30363d; border-radius:8px; color:#e6edf3; padding:8px 12px; margin:3px 0; cursor:pointer; font-size:.9rem; }
-.folder-btn:hover { background:#30363d; }
 div[data-testid="stButton"] button { background:#21262d; border:1px solid #30363d; color:#e6edf3; border-radius:8px; }
 div[data-testid="stButton"] button:hover { background:#30363d; border-color:#58a6ff; }
 .stRadio label { color:#e6edf3 !important; }
+.stCheckbox label { color:#e6edf3 !important; font-size:.9rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -48,7 +47,7 @@ GITHUB_REPO  = st.secrets.get("GITHUB_REPO","")
 WATCHLIST_FILE = st.secrets.get("WATCHLIST_FILE","watchlist.json")
 
 def load_watchlist_from_github():
-    if not GITHUB_TOKEN or not GITHUB_REPO: return None
+    if not GITHUB_TOKEN or not GITHUB_REPO: return None, None
     try:
         r = requests.get(f"https://api.github.com/repos/{GITHUB_REPO}/contents/{WATCHLIST_FILE}",
                          headers={"Authorization":f"token {GITHUB_TOKEN}","Accept":"application/vnd.github.v3+json"}, timeout=8)
@@ -133,17 +132,11 @@ def get_institutional(code):
             def parse(s):
                 try: return int(str(s).replace(',','').replace('+',''))
                 except: return 0
-            foreign = parse(row[4])
-            trust   = parse(row[8])
-            dealer  = parse(row[11])
-            total   = parse(row[13])
-            return foreign, trust, dealer, total
+            return parse(row[4]), parse(row[8]), parse(row[11]), parse(row[13])
     except: pass
-    # Try OTC
     try:
         import datetime
         today = datetime.date.today()
-        date_str = today.strftime('%Y%m%d')
         url = f"https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&se=EW&t=D&d={today.strftime('%Y/%m/%d')}&stkno={code}&s=0,asc,0"
         r = requests.get(url, timeout=8, headers={"User-Agent":"Mozilla/5.0"})
         d = r.json()
@@ -152,15 +145,12 @@ def get_institutional(code):
             def parse(s):
                 try: return int(str(s).replace(',','').replace('+',''))
                 except: return 0
-            foreign = parse(row[4])
-            trust   = parse(row[10])
-            dealer  = parse(row[13])
-            total   = foreign + trust + dealer
-            return foreign, trust, dealer, total
+            f = parse(row[4]); t = parse(row[10]); dl = parse(row[13])
+            return f, t, dl, f+t+dl
     except: pass
     return None
 
-# ── Folders session state ───────────────────────────────────────────
+# ── Folders ─────────────────────────────────────────────────────────
 DEFAULT_FOLDERS = {
     "⭐ 我的最愛": [],
     "🔬 半導體": ["2330","2317","2454"],
@@ -178,10 +168,20 @@ def init_folders():
 def save_folders():
     save_watchlist_to_github(st.session_state.folders)
 
-# ── K-Line Chart ────────────────────────────────────────────────────
+# ── MA config ───────────────────────────────────────────────────────
+MA_CONFIG = [
+    (5,   '#f0883e'),   # orange
+    (10,  '#58a6ff'),   # blue
+    (20,  '#bc8cff'),   # purple
+    (60,  '#3fb950'),   # green
+    (120, '#f85149'),   # red
+    (240, '#ffa657'),   # yellow-orange
+]
+
+# ── OHLCV fetch ─────────────────────────────────────────────────────
 def get_ohlcv(ticker_symbol, period):
-    period_map = {"1個月":"1mo","3個月":"3mo","6個月":"6mo","1年":"1y","2年":"2y"}
-    p = period_map.get(period, "3mo")
+    period_map = {"1個月":"1mo","3個月":"3mo","6個月":"6mo","1年":"1y","2年":"2y","3年":"3y"}
+    p = period_map.get(period, "6mo")
     tk = yf.Ticker(ticker_symbol)
     df = tk.history(period=p)
     if df.empty: return None
@@ -191,14 +191,12 @@ def get_ohlcv(ticker_symbol, period):
         df.columns = df.columns.get_level_values(0)
     return df
 
-def make_kline_chart(df, name, code, sector):
-    # MA lines
+# ── K-Line Chart ────────────────────────────────────────────────────
+def make_kline_chart(df, name, code, sector, active_mas):
     df = df.copy()
-    df['MA5']  = df['Close'].rolling(5).mean()
-    df['MA10'] = df['Close'].rolling(10).mean()
-    df['MA20'] = df['Close'].rolling(20).mean()
+    for n, _ in MA_CONFIG:
+        df[f'MA{n}'] = df['Close'].rolling(n).mean()
 
-    # Colors for candles
     colors = ['#3fb950' if c >= o else '#f85149'
               for c, o in zip(df['Close'], df['Open'])]
 
@@ -210,43 +208,45 @@ def make_kline_chart(df, name, code, sector):
         subplot_titles=(f"{name} ({code})  |  族群: {sector or 'N/A'}", "成交量")
     )
 
-    # Candlestick
     fig.add_trace(go.Candlestick(
         x=df.index,
         open=df['Open'], high=df['High'],
         low=df['Low'],   close=df['Close'],
         increasing=dict(line=dict(color='#3fb950'), fillcolor='#3fb950'),
         decreasing=dict(line=dict(color='#f85149'), fillcolor='#f85149'),
-        name='K線',
-        showlegend=False
+        name='K線', showlegend=False
     ), row=1, col=1)
 
-    # MA lines
-    for ma, color, width in [('MA5','#f0883e',1.5),('MA10','#58a6ff',1.5),('MA20','#bc8cff',1.5)]:
+    for n, color in MA_CONFIG:
+        key = f'MA{n}'
+        visible = key in active_mas
         fig.add_trace(go.Scatter(
-            x=df.index, y=df[ma],
-            name=ma, line=dict(color=color, width=width),
+            x=df.index, y=df[key],
+            name=key,
+            line=dict(color=color, width=1.5),
+            visible=True if visible else 'legendonly',
             hovertemplate='%{y:.2f}'
         ), row=1, col=1)
 
-    # Volume bars
     fig.add_trace(go.Bar(
         x=df.index, y=df['Volume'],
         marker_color=colors,
-        name='成交量',
-        showlegend=False,
-        opacity=0.8
+        name='成交量', showlegend=False, opacity=0.8
     ), row=2, col=1)
 
     fig.update_layout(
-        height=520,
+        height=560,
         paper_bgcolor='#0d1117',
         plot_bgcolor='#161b22',
         font=dict(color='#e6edf3', family='Noto Sans TC'),
         xaxis_rangeslider_visible=False,
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
-                    bgcolor='rgba(0,0,0,0)', font=dict(size=12)),
-        margin=dict(l=50, r=20, t=40, b=20),
+        legend=dict(
+            orientation='h', yanchor='bottom', y=1.02,
+            xanchor='right', x=1,
+            bgcolor='rgba(0,0,0,0)', font=dict(size=12),
+            itemclick='toggle', itemdoubleclick='toggleothers'
+        ),
+        margin=dict(l=50, r=20, t=45, b=20),
         hovermode='x unified'
     )
     fig.update_xaxes(
@@ -257,11 +257,8 @@ def make_kline_chart(df, name, code, sector):
     fig.update_yaxes(gridcolor='#21262d', showgrid=True)
     fig.update_yaxes(title_text="價格 (TWD)", row=1, col=1)
     fig.update_yaxes(title_text="成交量", row=2, col=1)
-
-    # Subplot title styling
     for ann in fig.layout.annotations:
         ann.font = dict(size=13, color='#8b949e')
-
     return fig
 
 def get_metrics(df):
@@ -270,24 +267,20 @@ def get_metrics(df):
     prev   = close.iloc[-2] if len(close)>1 else latest
     chg    = latest - prev
     chg_pct = chg/prev*100 if prev else 0
-    high52 = close.max()
-    low52  = close.min()
-    return latest, chg, chg_pct, high52, low52
+    return latest, chg, chg_pct, close.max(), close.min()
 
-# ── Main UI ─────────────────────────────────────────────────────────
+# ── Main ─────────────────────────────────────────────────────────────
 st.markdown('<div class="main-header"><h1>📈 台股K線分析</h1><p>輸入股票代碼或中文名稱，即時顯示K線圖＋均線＋成交量</p></div>', unsafe_allow_html=True)
 
 init_folders()
 
-# ── Sidebar ─────────────────────────────────────────────────────────
+# ── Sidebar ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 📁 自選股資料夾")
-
     folder_names = list(st.session_state.folders.keys())
     for fn in folder_names:
         stocks = st.session_state.folders[fn]
-        label = f"{fn}  ({len(stocks)})"
-        if st.button(label, key=f"folder_{fn}", use_container_width=True):
+        if st.button(f"{fn}  ({len(stocks)})", key=f"folder_{fn}", use_container_width=True):
             st.session_state.cur_folder = fn
             st.session_state.batch_codes = stocks.copy()
             st.session_state.do_analyze = False
@@ -297,7 +290,7 @@ with st.sidebar:
     cur = st.session_state.cur_folder
     cur_stocks = st.session_state.folders.get(cur, [])
 
-    with st.expander("➕ 新增股票到資料夾"):
+    with st.expander("➕ 新增股票"):
         add_code = st.text_input("輸入代碼", key="add_code_input", placeholder="e.g. 2330")
         if st.button("新增", key="btn_add"):
             c = add_code.strip()
@@ -327,7 +320,7 @@ with st.sidebar:
                 save_folders()
                 st.success(f"已建立 {nf}")
                 st.rerun()
-        if len(folder_names)>1:
+        if len(folder_names) > 1:
             del_folder = st.selectbox("刪除資料夾", folder_names, key="del_folder_select")
             if st.button("刪除資料夾", key="btn_del_folder"):
                 del st.session_state.folders[del_folder]
@@ -336,50 +329,58 @@ with st.sidebar:
                 st.rerun()
 
     st.markdown("---")
-    period = st.radio("📅 期間", ["1個月","3個月","6個月","1年","2年"], index=2, key="period_select")
+    period = st.radio("📅 期間", ["1個月","3個月","6個月","1年","2年","3年"], index=2, key="period_select")
 
-# ── Search box ──────────────────────────────────────────────────────
-col_search, col_hint = st.columns([3,2])
-with col_search:
-    last_val = st.session_state.get('last_input','')
-    user_input = st.text_input(
-        "🔍 輸入代碼或股票名稱（按 Enter 分析）",
-        key="main_input",
-        placeholder="e.g. 2330 或 台積電",
-        label_visibility="collapsed"
-    )
+    st.markdown("---")
+    st.markdown("**📊 均線顯示**")
+    active_mas = []
+    # Default on: MA5, MA10, MA20; Default off: MA60, MA120, MA240
+    defaults = {5:True, 10:True, 20:True, 60:False, 120:False, 240:False}
+    cols_ma = st.columns(2)
+    for i, (n, color) in enumerate(MA_CONFIG):
+        col = cols_ma[i % 2]
+        label_html = f'<span style="color:{color};font-weight:700;">MA{n}</span>'
+        checked = col.checkbox(f"MA{n}", value=defaults[n], key=f"ma_toggle_{n}")
+        if checked:
+            active_mas.append(f"MA{n}")
 
-# Detect Enter (new value submitted)
-if user_input and user_input != last_val:
+# ── Search ───────────────────────────────────────────────────────────
+user_input = st.text_input(
+    "🔍",
+    key="main_input",
+    placeholder="e.g. 2330 或 台積電（按 Enter 分析）",
+    label_visibility="collapsed"
+)
+
+if user_input and user_input != st.session_state.get('last_input',''):
     st.session_state.last_input = user_input
     st.session_state.do_analyze = True
     st.session_state.batch_codes = []
 
-# ── Batch folder analysis ────────────────────────────────────────────
 batch = st.session_state.get('batch_codes', [])
 
-def render_stock(code_raw, period):
+# ── Render stock ─────────────────────────────────────────────────────
+def render_stock(code_raw, period, active_mas):
     ticker_sym = resolve(code_raw)
     base_code = ticker_sym.split('.')[0]
     name, _, sector = get_info(base_code)
 
     df = get_ohlcv(ticker_sym, period)
-    if df is None or len(df)<5:
+    if df is None or len(df) < 5:
         st.warning(f"⚠️ 無法取得 {code_raw} 的資料")
         return
 
-    latest, chg, chg_pct, high52, low52 = get_metrics(df)
-    chg_class = "up" if chg>=0 else "down"
-    sign = "+" if chg>=0 else ""
+    latest, chg, chg_pct, high_val, low_val = get_metrics(df)
+    chg_class = "up" if chg >= 0 else "down"
+    sign = "+" if chg >= 0 else ""
 
-    # Institutional
     inst = get_institutional(base_code)
     if inst:
         foreign, trust, dealer, total = inst
         def fmt_inst(v):
             color = "up" if v>0 else ("down" if v<0 else "neutral")
-            sign2 = "+" if v>0 else ""
-            return f'<span class="{color}">{sign2}{v:,}</span>'
+            s = "+" if v>0 else ""
+            return f'<span class="{color}">{s}{v:,}</span>'
         inst_html = f"""
         <div class="inst-row">
           <div class="inst-box"><div class="inst-label">外資</div>{fmt_inst(foreign)}</div>
@@ -401,21 +402,20 @@ def render_stock(code_raw, period):
         <div class="metric-box"><div class="metric-label">最新收盤</div><div class="metric-value {chg_class}">{latest:.2f}</div></div>
         <div class="metric-box"><div class="metric-label">漲跌</div><div class="metric-value {chg_class}">{sign}{chg:.2f}</div></div>
         <div class="metric-box"><div class="metric-label">漲跌幅</div><div class="metric-value {chg_class}">{sign}{chg_pct:.2f}%</div></div>
-        <div class="metric-box"><div class="metric-label">區間最高</div><div class="metric-value up">{high52:.2f}</div></div>
-        <div class="metric-box"><div class="metric-label">區間最低</div><div class="metric-value down">{low52:.2f}</div></div>
+        <div class="metric-box"><div class="metric-label">區間最高</div><div class="metric-value up">{high_val:.2f}</div></div>
+        <div class="metric-box"><div class="metric-label">區間最低</div><div class="metric-value down">{low_val:.2f}</div></div>
       </div>
       {inst_html}
     </div>
     """, unsafe_allow_html=True)
 
-    # K-Line chart
-    fig = make_kline_chart(df, name or code_raw, base_code, sector)
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar':False})
+    fig = make_kline_chart(df, name or code_raw, base_code, sector, active_mas)
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-# Search suggestions
-if user_input and len(user_input)>=1 and not st.session_state.get('do_analyze'):
+# Suggestions
+if user_input and not st.session_state.get('do_analyze'):
     results = search_stocks(user_input)
-    if results and not any(r[0]==user_input for r in results):
+    if results and not any(r[0] == user_input for r in results):
         options = [f"{r[0]} {r[1]}" for r in results[:8]]
         chosen = st.selectbox("選擇股票：", [""] + options, key="suggest_select")
         if chosen:
@@ -429,8 +429,7 @@ if user_input and len(user_input)>=1 and not st.session_state.get('do_analyze'):
 if batch:
     st.markdown(f"### 📁 {st.session_state.cur_folder}")
     for c in batch:
-        render_stock(c, period)
-
+        render_stock(c, period, active_mas)
 elif st.session_state.get('do_analyze') and user_input:
-    render_stock(user_input, period)
+    render_stock(user_input, period, active_mas)
     st.session_state.do_analyze = False
