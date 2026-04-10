@@ -7,7 +7,7 @@ import warnings, json, base64, requests, datetime
 
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="å°è¡Kç·åæ", page_icon="ð", layout="wide")
+st.set_page_config(page_title="台股K線分析", page_icon="📈", layout="wide")
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap');
@@ -35,7 +35,7 @@ div[data-testid="stButton"] button:hover { background:#30363d; border-color:#58a
 .stRadio label, .stCheckbox label { color:#e6edf3 !important; }
 .inst-wrap { overflow-x:auto; margin:8px 0; }
 .inst-table { width:100%; border-collapse:collapse; font-size:.82rem; white-space:nowrap; }
-.inst-table th { background:#21262d; color:#8b949e; padding:7px 12px; text-align:right; font-weight:600; border-bottom:2px solid #30363d; position:sticky; top:0; }
+.inst-table th { background:#21262d; color:#8b949e; padding:7px 12px; text-align:right; font-weight:600; border-bottom:2px solid #30363d; }
 .inst-table th:first-child { text-align:center; min-width:80px; }
 .inst-table td { padding:5px 12px; text-align:right; border-bottom:1px solid #1c2333; }
 .inst-table td:first-child { text-align:center; color:#8b949e; }
@@ -82,8 +82,8 @@ def load_stock_db():
             name   = getattr(s,'name','')
             market = getattr(s,'market','')
             group  = getattr(s,'group','')
-            if market in ('ä¸å¸','ä¸æ«'):
-                suffix = '.TW' if market=='ä¸å¸' else '.TWO'
+            if market in ('上市','上櫃'):
+                suffix = '.TW' if market=='上市' else '.TWO'
                 db[code] = (name, suffix, group)
         return db
     except:
@@ -118,7 +118,6 @@ def resolve(raw):
     if results: return results[0][0] + results[0][2]
     return raw + '.TW'
 
-# ââ FinMind ä¸å¤§æ³äºº (20å¤©) âââââââââââââââââââââââââââââââââââââââââ
 @st.cache_data(ttl=3600)
 def get_institutional_20d(code):
     try:
@@ -130,84 +129,47 @@ def get_institutional_20d(code):
         raw = r.json()
         if raw.get('status') != 200 or not raw.get('data'):
             return []
-        # Group by date
         from collections import defaultdict
         daily = defaultdict(lambda: {'foreign':0,'trust':0,'dealer':0})
         for row in raw['data']:
             d    = row['date']
             name = row['name']
             net  = int(row['buy']) - int(row['sell'])
-            if name == 'Foreign_Investor':
-                daily[d]['foreign'] += net
-            elif name == 'Investment_Trust':
-                daily[d]['trust'] += net
-            elif name in ('Dealer_self', 'Dealer_Hedging'):
-                daily[d]['dealer'] += net
-        # Sort dates descending, take 20
+            if name == 'Foreign_Investor':        daily[d]['foreign'] += net
+            elif name == 'Investment_Trust':      daily[d]['trust']   += net
+            elif name in ('Dealer_self','Dealer_Hedging'): daily[d]['dealer'] += net
         dates = sorted(daily.keys(), reverse=True)[:20]
-        result = []
-        for d in dates:
-            v = daily[d]
-            result.append({
-                'date': d,
-                'foreign': v['foreign'],
-                'trust':   v['trust'],
-                'dealer':  v['dealer'],
-                'total':   v['foreign'] + v['trust'] + v['dealer']
-            })
-        return result
-    except Exception as e:
+        return [{'date':d,'foreign':daily[d]['foreign'],'trust':daily[d]['trust'],
+                 'dealer':daily[d]['dealer'],'total':daily[d]['foreign']+daily[d]['trust']+daily[d]['dealer']}
+                for d in dates]
+    except:
         return []
 
 def render_inst_table(rows):
     if not rows:
-        return '<div style="color:#8b949e;font-size:.82rem;padding:10px 0">â ï¸ ç¡æ³åå¾ä¸å¤§æ³äººè³æ</div>'
-
+        return '<div style="color:#8b949e;font-size:.82rem;padding:10px 0">⚠️ 無法取得三大法人資料</div>'
     def cell(v):
-        if v > 0:   return f'<span class="up">+{v:,}</span>'
-        elif v < 0: return f'<span class="down">{v:,}</span>'
-        else:       return '<span class="neutral">-</span>'
-
-    sum_f = sum(r['foreign'] for r in rows)
-    sum_t = sum(r['trust']   for r in rows)
-    sum_d = sum(r['dealer']  for r in rows)
-    sum_all = sum_f + sum_t + sum_d
-    n = len(rows)
-
+        if v>0:   return f'<span class="up">+{v:,}</span>'
+        elif v<0: return f'<span class="down">{v:,}</span>'
+        else:     return '<span class="neutral">-</span>'
+    sum_f=sum(r['foreign'] for r in rows); sum_t=sum(r['trust'] for r in rows)
+    sum_d=sum(r['dealer'] for r in rows); sum_all=sum_f+sum_t+sum_d; n=len(rows)
     html = f"""<div class="inst-wrap"><table class="inst-table">
       <thead><tr>
-        <th>æ¥æ</th>
-        <th>å¤è³ï¼å¼µï¼</th>
-        <th>æä¿¡ï¼å¼µï¼</th>
-        <th>èªçåï¼å¼µï¼</th>
-        <th>åè¨ï¼å¼µï¼</th>
+        <th>日期</th><th>外資（張）</th><th>投信（張）</th><th>自營商（張）</th><th>合計（張）</th>
       </tr></thead><tbody>"""
-
     for row in rows:
-        html += f"""<tr>
-          <td>{row['date']}</td>
-          <td>{cell(row['foreign'])}</td>
-          <td>{cell(row['trust'])}</td>
-          <td>{cell(row['dealer'])}</td>
-          <td>{cell(row['total'])}</td>
-        </tr>"""
-
+        html += f"<tr><td>{row['date']}</td><td>{cell(row['foreign'])}</td><td>{cell(row['trust'])}</td><td>{cell(row['dealer'])}</td><td>{cell(row['total'])}</td></tr>"
     html += f"""<tr class="total-row">
-          <td>ð {n}æ¥åè¨</td>
-          <td>{cell(sum_f)}</td>
-          <td>{cell(sum_t)}</td>
-          <td>{cell(sum_d)}</td>
-          <td>{cell(sum_all)}</td>
-        </tr>"""
-
-    html += "</tbody></table></div>"
+      <td>📊 {n}日合計</td><td>{cell(sum_f)}</td><td>{cell(sum_t)}</td><td>{cell(sum_d)}</td><td>{cell(sum_all)}</td>
+    </tr></tbody></table></div>"""
     return html
 
 DEFAULT_FOLDERS = {
-    "â­ æçææ": [],
-    "ð¬ åå°é«": ["2330","2317","2454"],
-    "ð¢ èªé": ["2603","2615","2609"],
-    "ð¦ éè": ["2882","2881","2891"]
+    "⭐ 我的最愛": [],
+    "🔬 半導體": ["2330","2317","2454"],
+    "🚢 航運": ["2603","2615","2609"],
+    "🏦 金融": ["2882","2881","2891"]
 }
 
 def init_folders():
@@ -230,7 +192,7 @@ MA_CONFIG = [
 ]
 
 def get_ohlcv(ticker_symbol, period):
-    period_map = {"1åæ":"1mo","3åæ":"3mo","6åæ":"6mo","1å¹´":"1y","2å¹´":"2y","3å¹´":"3y"}
+    period_map = {"1個月":"1mo","3個月":"3mo","6個月":"6mo","1年":"1y","2年":"2y","3年":"3y"}
     p = period_map.get(period, "6mo")
     tk = yf.Ticker(ticker_symbol)
     df = tk.history(period=p)
@@ -247,7 +209,7 @@ def make_kline_chart(df, name, code, sector, active_mas):
         df[f'MA{n}'] = df['Close'].rolling(n).mean()
     colors = ['#3fb950' if c >= o else '#f85149' for c, o in zip(df['Close'], df['Open'])]
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03,
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02,
                         row_heights=[0.68, 0.32],
                         subplot_titles=(f"{name} ({code})  |  族群: {sector or 'N/A'}", "成交量"))
 
@@ -267,7 +229,6 @@ def make_kline_chart(df, name, code, sector, active_mas):
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors,
         name='成交量', showlegend=False, opacity=0.8), row=2, col=1)
 
-    # Range selector buttons (top-right quick filters)
     rangeselector = dict(
         buttons=[
             dict(count=1,  label='1M',  step='month', stepmode='backward'),
@@ -277,25 +238,22 @@ def make_kline_chart(df, name, code, sector, active_mas):
             dict(count=2,  label='2Y',  step='year',  stepmode='backward'),
             dict(step='all', label='全部'),
         ],
-        bgcolor='#21262d',
-        activecolor='#58a6ff',
-        bordercolor='#30363d',
-        borderwidth=1,
+        bgcolor='#21262d', activecolor='#58a6ff',
+        bordercolor='#30363d', borderwidth=1,
         font=dict(color='#e6edf3', size=11),
         x=0, y=1.0,
     )
 
     fig.update_layout(
-        height=620,
+        height=640,
         paper_bgcolor='#0d1117',
         plot_bgcolor='#161b22',
         font=dict(color='#e6edf3', family='Noto Sans TC'),
-        # ── Rangeslider ────────────────────────────────────────────
         xaxis=dict(
             rangeslider=dict(
                 visible=True,
-                thickness=0.06,
-                bgcolor='#161b22',
+                thickness=0.05,
+                bgcolor='#1c2333',
                 bordercolor='#30363d',
                 borderwidth=1,
             ),
@@ -312,7 +270,6 @@ def make_kline_chart(df, name, code, sector, active_mas):
         hovermode='x unified',
         dragmode='zoom',
     )
-    # Volume chart x-axis (shared, no rangeslider here)
     fig.update_xaxes(gridcolor='#21262d', showgrid=True, row=2, col=1)
     fig.update_yaxes(gridcolor='#21262d', showgrid=True)
     fig.update_yaxes(title_text="價格 (TWD)", row=1, col=1)
@@ -327,12 +284,11 @@ def get_metrics(df):
     chg = latest - prev; chg_pct = chg/prev*100 if prev else 0
     return latest, chg, chg_pct, close.max(), close.min()
 
-# ââ Main UI âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-st.markdown('<div class="main-header"><h1>ð å°è¡Kç·åæ</h1><p>è¼¸å¥è¡ç¥¨ä»£ç¢¼æä¸­æåç¨±ï¼å³æé¡¯ç¤ºKç·åï¼åç·ï¼æäº¤é</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1>📈 台股K線分析</h1><p>輸入股票代碼或中文名稱，即時顯示K線圖＋均線＋成交量</p></div>', unsafe_allow_html=True)
 init_folders()
 
 with st.sidebar:
-    st.markdown("### ð èªé¸è¡è³æå¤¾")
+    st.markdown("### 📁 自選股資料夾")
     folder_names = list(st.session_state.folders.keys())
     for fn in folder_names:
         stocks = st.session_state.folders[fn]
@@ -341,40 +297,40 @@ with st.sidebar:
             st.session_state.batch_codes = stocks.copy()
             st.session_state.do_analyze = False
     st.markdown("---")
-    st.markdown("**ç¶åè³æå¤¾ï¼** " + st.session_state.cur_folder)
+    st.markdown("**當前資料夾：** " + st.session_state.cur_folder)
     cur = st.session_state.cur_folder
     cur_stocks = st.session_state.folders.get(cur, [])
-    with st.expander("â æ°å¢è¡ç¥¨"):
-        add_code = st.text_input("è¼¸å¥ä»£ç¢¼", key="add_code_input", placeholder="e.g. 2330")
-        if st.button("æ°å¢", key="btn_add"):
+    with st.expander("➕ 新增股票"):
+        add_code = st.text_input("輸入代碼", key="add_code_input", placeholder="e.g. 2330")
+        if st.button("新增", key="btn_add"):
             c = add_code.strip()
             if c and c not in st.session_state.folders[cur]:
                 st.session_state.folders[cur].append(c)
-                save_folders(); st.success(f"å·²æ°å¢ {c}"); st.rerun()
-    with st.expander("ðï¸ ç§»é¤è¡ç¥¨"):
+                save_folders(); st.success(f"已新增 {c}"); st.rerun()
+    with st.expander("🗑️ 移除股票"):
         if cur_stocks:
-            rm = st.selectbox("é¸æç§»é¤", cur_stocks, key="rm_select")
-            if st.button("ç§»é¤", key="btn_rm"):
+            rm = st.selectbox("選擇移除", cur_stocks, key="rm_select")
+            if st.button("移除", key="btn_rm"):
                 st.session_state.folders[cur].remove(rm)
-                save_folders(); st.success(f"å·²ç§»é¤ {rm}"); st.rerun()
+                save_folders(); st.success(f"已移除 {rm}"); st.rerun()
         else:
-            st.caption("è³æå¤¾æ¯ç©ºç")
-    with st.expander("ð ç®¡çè³æå¤¾"):
-        new_folder = st.text_input("æ°è³æå¤¾åç¨±", key="new_folder_input")
-        if st.button("å»ºç«è³æå¤¾", key="btn_new_folder"):
+            st.caption("資料夾是空的")
+    with st.expander("📁 管理資料夾"):
+        new_folder = st.text_input("新資料夾名稱", key="new_folder_input")
+        if st.button("建立資料夾", key="btn_new_folder"):
             nf = new_folder.strip()
             if nf and nf not in st.session_state.folders:
-                st.session_state.folders[nf] = []; save_folders(); st.success(f"å·²å»ºç« {nf}"); st.rerun()
+                st.session_state.folders[nf] = []; save_folders(); st.success(f"已建立 {nf}"); st.rerun()
         if len(folder_names) > 1:
-            del_folder = st.selectbox("åªé¤è³æå¤¾", folder_names, key="del_folder_select")
-            if st.button("åªé¤è³æå¤¾", key="btn_del_folder"):
+            del_folder = st.selectbox("刪除資料夾", folder_names, key="del_folder_select")
+            if st.button("刪除資料夾", key="btn_del_folder"):
                 del st.session_state.folders[del_folder]
                 st.session_state.cur_folder = list(st.session_state.folders.keys())[0]
                 save_folders(); st.rerun()
     st.markdown("---")
-    period = st.radio("ð æé", ["1åæ","3åæ","6åæ","1å¹´","2å¹´","3å¹´"], index=2, key="period_select")
+    period = st.radio("📅 期間", ["1個月","3個月","6個月","1年","2年","3年"], index=2, key="period_select")
     st.markdown("---")
-    st.markdown("**ð åç·é¡¯ç¤º**")
+    st.markdown("**📊 均線顯示**")
     active_mas = []
     defaults = {5:True, 10:True, 20:True, 60:False, 120:False, 240:False}
     cols_ma = st.columns(2)
@@ -383,8 +339,8 @@ with st.sidebar:
         if col.checkbox(f"MA{n}", value=defaults[n], key=f"ma_toggle_{n}"):
             active_mas.append(f"MA{n}")
 
-user_input = st.text_input("ð", key="main_input",
-    placeholder="e.g. 2330 æ å°ç©é»ï¼æ Enter åæï¼", label_visibility="collapsed")
+user_input = st.text_input("🔍", key="main_input",
+    placeholder="e.g. 2330 或 台積電（按 Enter 分析）", label_visibility="collapsed")
 
 if user_input and user_input != st.session_state.get('last_input',''):
     st.session_state.last_input = user_input
@@ -399,7 +355,7 @@ def render_stock(code_raw, period, active_mas):
     name, _, sector = get_info(base_code)
     df = get_ohlcv(ticker_sym, period)
     if df is None or len(df) < 5:
-        st.warning(f"â ï¸ ç¡æ³åå¾ {code_raw} çè³æ"); return
+        st.warning(f"⚠️ 無法取得 {code_raw} 的資料"); return
     latest, chg, chg_pct, high_val, low_val = get_metrics(df)
     chg_class = "up" if chg >= 0 else "down"
     sign = "+" if chg >= 0 else ""
@@ -411,17 +367,22 @@ def render_stock(code_raw, period, active_mas):
         <span class="card-sector">{sector or 'N/A'}</span>
       </div>
       <div class="metric-row">
-        <div class="metric-box"><div class="metric-label">ææ°æ¶ç¤</div><div class="metric-value {chg_class}">{latest:.2f}</div></div>
-        <div class="metric-box"><div class="metric-label">æ¼²è·</div><div class="metric-value {chg_class}">{sign}{chg:.2f}</div></div>
-        <div class="metric-box"><div class="metric-label">æ¼²è·å¹</div><div class="metric-value {chg_class}">{sign}{chg_pct:.2f}%</div></div>
-        <div class="metric-box"><div class="metric-label">åéæé«</div><div class="metric-value up">{high_val:.2f}</div></div>
-        <div class="metric-box"><div class="metric-label">åéæä½</div><div class="metric-value down">{low_val:.2f}</div></div>
+        <div class="metric-box"><div class="metric-label">最新收盤</div><div class="metric-value {chg_class}">{latest:.2f}</div></div>
+        <div class="metric-box"><div class="metric-label">漲跨</div><div class="metric-value {chg_class}">{sign}{chg:.2f}</div></div>
+        <div class="metric-box"><div class="metric-label">漲跨幅</div><div class="metric-value {chg_class}">{sign}{chg_pct:.2f}%</div></div>
+        <div class="metric-box"><div class="metric-label">區間最高</div><div class="metric-value up">{high_val:.2f}</div></div>
+        <div class="metric-box"><div class="metric-label">區間最低</div><div class="metric-value down">{low_val:.2f}</div></div>
       </div>
     </div>""", unsafe_allow_html=True)
     fig = make_kline_chart(df, name or code_raw, base_code, sector, active_mas)
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True, 'modeBarButtonsToRemove': ['lasso2d','select2d','toImage']})
-    with st.expander("ð¦ ä¸å¤§æ³äººæç´°ï¼è¿20åäº¤ææ¥ï¼", expanded=True):
-        with st.spinner("è¼å¥ä¸å¤§æ³äººè³æ..."):
+    st.plotly_chart(fig, use_container_width=True, config={
+        'displayModeBar': True,
+        'scrollZoom': True,
+        'modeBarButtonsToRemove': ['lasso2d','select2d','toImage'],
+        'displaylogo': False
+    })
+    with st.expander("🏦 三大法人明細（近20個交易日）", expanded=True):
+        with st.spinner("載入三大法人資料..."):
             rows = get_institutional_20d(base_code)
         st.markdown(render_inst_table(rows), unsafe_allow_html=True)
 
@@ -429,7 +390,7 @@ if user_input and not st.session_state.get('do_analyze'):
     results = search_stocks(user_input)
     if results and not any(r[0] == user_input for r in results):
         options = [f"{r[0]} {r[1]}" for r in results[:8]]
-        chosen = st.selectbox("é¸æè¡ç¥¨ï¼", [""] + options, key="suggest_select")
+        chosen = st.selectbox("選擇股票：", [""] + options, key="suggest_select")
         if chosen:
             pick = chosen.split()[0]
             st.session_state.last_input = pick
@@ -438,7 +399,7 @@ if user_input and not st.session_state.get('do_analyze'):
             st.rerun()
 
 if batch:
-    st.markdown(f"### ð {st.session_state.cur_folder}")
+    st.markdown(f"### 📁 {st.session_state.cur_folder}")
     for c in batch:
         render_stock(c, period, active_mas)
 elif st.session_state.get('do_analyze') and user_input:
