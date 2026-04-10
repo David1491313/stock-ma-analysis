@@ -32,21 +32,19 @@ html, body, [class*="css"] { font-family: 'Noto Sans TC', sans-serif; background
 section[data-testid="stSidebar"] { background:#161b22 !important; border-right:1px solid #30363d; }
 div[data-testid="stButton"] button { background:#21262d; border:1px solid #30363d; color:#e6edf3; border-radius:8px; }
 div[data-testid="stButton"] button:hover { background:#30363d; border-color:#58a6ff; }
-.stRadio label { color:#e6edf3 !important; }
-.stCheckbox label { color:#e6edf3 !important; font-size:.9rem !important; }
-/* Inst table */
-.inst-table { width:100%; border-collapse:collapse; font-size:.82rem; margin:10px 0 4px 0; }
-.inst-table th { background:#21262d; color:#8b949e; padding:6px 10px; text-align:right; font-weight:600; border-bottom:1px solid #30363d; }
-.inst-table th:first-child { text-align:center; }
-.inst-table td { padding:5px 10px; text-align:right; border-bottom:1px solid #21262d; }
+.stRadio label, .stCheckbox label { color:#e6edf3 !important; }
+.inst-wrap { overflow-x:auto; margin:8px 0; }
+.inst-table { width:100%; border-collapse:collapse; font-size:.82rem; white-space:nowrap; }
+.inst-table th { background:#21262d; color:#8b949e; padding:7px 12px; text-align:right; font-weight:600; border-bottom:2px solid #30363d; position:sticky; top:0; }
+.inst-table th:first-child { text-align:center; min-width:80px; }
+.inst-table td { padding:5px 12px; text-align:right; border-bottom:1px solid #1c2333; }
 .inst-table td:first-child { text-align:center; color:#8b949e; }
-.inst-table tr:last-child td { border-bottom:none; }
-.inst-table tr.total-row td { background:#1c2333; font-weight:700; border-top:2px solid #30363d; }
+.inst-table tr:hover td { background:#1c2333; }
+.inst-table tr.total-row td { background:#1c2333; font-weight:700; border-top:2px solid #30363d; border-bottom:none; }
 .inst-table tr.total-row td:first-child { color:#e6edf3; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── GitHub persistence ──────────────────────────────────────────────
 GITHUB_TOKEN   = st.secrets.get("GITHUB_TOKEN","")
 GITHUB_REPO    = st.secrets.get("GITHUB_REPO","")
 WATCHLIST_FILE = st.secrets.get("WATCHLIST_FILE","watchlist.json")
@@ -75,16 +73,15 @@ def save_watchlist_to_github(data):
         return r.status_code in (200,201)
     except: return False
 
-# ── Stock DB ────────────────────────────────────────────────────────
 @st.cache_data(ttl=86400)
 def load_stock_db():
     try:
         import twstock
         db = {}
         for code, s in twstock.codes.items():
-            name    = getattr(s,'name','')
-            market  = getattr(s,'market','')
-            group   = getattr(s,'group','')
+            name   = getattr(s,'name','')
+            market = getattr(s,'market','')
+            group  = getattr(s,'group','')
             if market in ('上市','上櫃'):
                 suffix = '.TW' if market=='上市' else '.TWO'
                 db[code] = (name, suffix, group)
@@ -96,7 +93,6 @@ def get_info(code):
     db = load_stock_db()
     return db.get(code, ('', '.TW', ''))
 
-def get_name(code):   return get_info(code)[0]
 def get_suffix(code): return get_info(code)[1]
 
 def search_stocks(query):
@@ -106,10 +102,10 @@ def search_stocks(query):
     ql = q.lower()
     results = []
     for code,(name,suffix,group) in db.items():
-        if code==q or name==q:           results.append((code,name,suffix,group,0))
-        elif code.startswith(q):         results.append((code,name,suffix,group,1))
-        elif name.startswith(q):         results.append((code,name,suffix,group,2))
-        elif ql in name.lower():         results.append((code,name,suffix,group,3))
+        if code==q or name==q:      results.append((code,name,suffix,group,0))
+        elif code.startswith(q):    results.append((code,name,suffix,group,1))
+        elif name.startswith(q):    results.append((code,name,suffix,group,2))
+        elif ql in name.lower():    results.append((code,name,suffix,group,3))
     results.sort(key=lambda x:(x[4], len(x[0])>4, x[0]))
     return results[:20]
 
@@ -122,103 +118,91 @@ def resolve(raw):
     if results: return results[0][0] + results[0][2]
     return raw + '.TW'
 
-# ── Institutional investors (20 days) ──────────────────────────────
-@st.cache_data(ttl=1800)
+# ── FinMind 三大法人 (20天) ─────────────────────────────────────────
+@st.cache_data(ttl=3600)
 def get_institutional_20d(code):
-    """Return list of dicts with date/foreign/trust/dealer/total for last 20 trading days."""
-    rows = []
-    # Try TWSE (上市)
     try:
-        url = f"https://www.twse.com.tw/rwd/zh/fund/T86?stockNo={code}&response=json"
-        r = requests.get(url, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
-        d = r.json()
-        if d.get('stat') == 'OK' and d.get('data'):
-            def parse(s):
-                try: return int(str(s).replace(',','').replace('+','').replace(' ',''))
-                except: return 0
-            for row in d['data']:
-                try:
-                    date_str = str(row[0])          # e.g. "114/04/08"
-                    foreign  = parse(row[4])
-                    trust    = parse(row[8])
-                    dealer   = parse(row[11])
-                    total    = parse(row[13])
-                    rows.append({"date":date_str,"foreign":foreign,"trust":trust,"dealer":dealer,"total":total})
-                except: continue
-            # newest last → reverse, take last 20
-            rows = list(reversed(rows))[:20]
-            return rows
-    except: pass
-    # Try TPEX (上櫃)
-    try:
-        today = datetime.date.today()
-        url = f"https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&se=EW&t=D&d={today.strftime('%Y/%m/%d')}&stkno={code}&s=0,asc,0"
-        r = requests.get(url, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
-        d = r.json()
-        if d.get('aaData'):
-            def parse(s):
-                try: return int(str(s).replace(',','').replace('+','').replace(' ',''))
-                except: return 0
-            for row in d['aaData']:
-                try:
-                    date_str = str(row[0])
-                    f  = parse(row[4])
-                    t  = parse(row[10])
-                    dl = parse(row[13])
-                    rows.append({"date":date_str,"foreign":f,"trust":t,"dealer":dl,"total":f+t+dl})
-                except: continue
-            rows = list(reversed(rows))[:20]
-            return rows
-    except: pass
-    return []
+        start = (datetime.date.today() - datetime.timedelta(days=45)).strftime('%Y-%m-%d')
+        url = (f"https://api.finmindtrade.com/api/v4/data"
+               f"?dataset=TaiwanStockInstitutionalInvestorsBuySell"
+               f"&data_id={code}&start_date={start}&token=")
+        r = requests.get(url, timeout=12, headers={"User-Agent":"Mozilla/5.0"})
+        raw = r.json()
+        if raw.get('status') != 200 or not raw.get('data'):
+            return []
+        # Group by date
+        from collections import defaultdict
+        daily = defaultdict(lambda: {'foreign':0,'trust':0,'dealer':0})
+        for row in raw['data']:
+            d    = row['date']
+            name = row['name']
+            net  = int(row['buy']) - int(row['sell'])
+            if name == 'Foreign_Investor':
+                daily[d]['foreign'] += net
+            elif name == 'Investment_Trust':
+                daily[d]['trust'] += net
+            elif name in ('Dealer_self', 'Dealer_Hedging'):
+                daily[d]['dealer'] += net
+        # Sort dates descending, take 20
+        dates = sorted(daily.keys(), reverse=True)[:20]
+        result = []
+        for d in dates:
+            v = daily[d]
+            result.append({
+                'date': d,
+                'foreign': v['foreign'],
+                'trust':   v['trust'],
+                'dealer':  v['dealer'],
+                'total':   v['foreign'] + v['trust'] + v['dealer']
+            })
+        return result
+    except Exception as e:
+        return []
 
 def render_inst_table(rows):
-    """Render an HTML table for institutional data with 20-day detail + cumulative total."""
     if not rows:
-        return '<div style="color:#8b949e;font-size:.82rem;padding:8px 0">三大法人：今日資料尚未更新或無資料</div>'
+        return '<div style="color:#8b949e;font-size:.82rem;padding:10px 0">⚠️ 無法取得三大法人資料</div>'
 
     def cell(v):
         if v > 0:   return f'<span class="up">+{v:,}</span>'
         elif v < 0: return f'<span class="down">{v:,}</span>'
-        else:       return f'<span class="neutral">0</span>'
+        else:       return '<span class="neutral">-</span>'
 
     sum_f = sum(r['foreign'] for r in rows)
     sum_t = sum(r['trust']   for r in rows)
     sum_d = sum(r['dealer']  for r in rows)
-    sum_total = sum(r['total'] for r in rows)
+    sum_all = sum_f + sum_t + sum_d
+    n = len(rows)
 
-    header = """
-    <table class="inst-table">
+    html = f"""<div class="inst-wrap"><table class="inst-table">
       <thead><tr>
         <th>日期</th>
-        <th>外資</th>
-        <th>投信</th>
-        <th>自營商</th>
-        <th>合計</th>
-      </tr></thead>
-      <tbody>"""
+        <th>外資（張）</th>
+        <th>投信（張）</th>
+        <th>自營商（張）</th>
+        <th>合計（張）</th>
+      </tr></thead><tbody>"""
 
-    body = ""
-    for r in rows:
-        body += f"""<tr>
-          <td>{r['date']}</td>
-          <td>{cell(r['foreign'])}</td>
-          <td>{cell(r['trust'])}</td>
-          <td>{cell(r['dealer'])}</td>
-          <td>{cell(r['total'])}</td>
+    for row in rows:
+        html += f"""<tr>
+          <td>{row['date']}</td>
+          <td>{cell(row['foreign'])}</td>
+          <td>{cell(row['trust'])}</td>
+          <td>{cell(row['dealer'])}</td>
+          <td>{cell(row['total'])}</td>
         </tr>"""
 
-    footer = f"""<tr class="total-row">
-          <td>20日合計</td>
+    html += f"""<tr class="total-row">
+          <td>📊 {n}日合計</td>
           <td>{cell(sum_f)}</td>
           <td>{cell(sum_t)}</td>
           <td>{cell(sum_d)}</td>
-          <td>{cell(sum_total)}</td>
+          <td>{cell(sum_all)}</td>
         </tr>"""
 
-    return header + body + footer + "</tbody></table>"
+    html += "</tbody></table></div>"
+    return html
 
-# ── Folders ─────────────────────────────────────────────────────────
 DEFAULT_FOLDERS = {
     "⭐ 我的最愛": [],
     "🔬 半導體": ["2330","2317","2454"],
@@ -236,7 +220,6 @@ def init_folders():
 def save_folders():
     save_watchlist_to_github(st.session_state.folders)
 
-# ── MA config ────────────────────────────────────────────────────────
 MA_CONFIG = [
     (5,   '#f0883e'),
     (10,  '#58a6ff'),
@@ -246,7 +229,6 @@ MA_CONFIG = [
     (240, '#ffa657'),
 ]
 
-# ── OHLCV ────────────────────────────────────────────────────────────
 def get_ohlcv(ticker_symbol, period):
     period_map = {"1個月":"1mo","3個月":"3mo","6個月":"6mo","1年":"1y","2年":"2y","3年":"3y"}
     p = period_map.get(period, "6mo")
@@ -259,60 +241,35 @@ def get_ohlcv(ticker_symbol, period):
         df.columns = df.columns.get_level_values(0)
     return df
 
-# ── K-Line Chart ─────────────────────────────────────────────────────
 def make_kline_chart(df, name, code, sector, active_mas):
     df = df.copy()
     for n, _ in MA_CONFIG:
         df[f'MA{n}'] = df['Close'].rolling(n).mean()
-
-    colors = ['#3fb950' if c >= o else '#f85149'
-              for c, o in zip(df['Close'], df['Open'])]
-
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.72, 0.28],
-        subplot_titles=(f"{name} ({code})  |  族群: {sector or 'N/A'}", "成交量")
-    )
-
+    colors = ['#3fb950' if c >= o else '#f85149' for c, o in zip(df['Close'], df['Open'])]
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03,
+                        row_heights=[0.72, 0.28],
+                        subplot_titles=(f"{name} ({code})  |  族群: {sector or 'N/A'}", "成交量"))
     fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df['Open'], high=df['High'],
-        low=df['Low'],   close=df['Close'],
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         increasing=dict(line=dict(color='#3fb950'), fillcolor='#3fb950'),
         decreasing=dict(line=dict(color='#f85149'), fillcolor='#f85149'),
-        name='K線', showlegend=False
-    ), row=1, col=1)
-
+        name='K線', showlegend=False), row=1, col=1)
     for n, color in MA_CONFIG:
         key = f'MA{n}'
-        fig.add_trace(go.Scatter(
-            x=df.index, y=df[key],
-            name=key,
+        fig.add_trace(go.Scatter(x=df.index, y=df[key], name=key,
             line=dict(color=color, width=1.5),
             visible=True if key in active_mas else 'legendonly',
-            hovertemplate='%{y:.2f}'
-        ), row=1, col=1)
-
-    fig.add_trace(go.Bar(
-        x=df.index, y=df['Volume'],
-        marker_color=colors,
-        name='成交量', showlegend=False, opacity=0.8
-    ), row=2, col=1)
-
+            hovertemplate='%{y:.2f}'), row=1, col=1)
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors,
+        name='成交量', showlegend=False, opacity=0.8), row=2, col=1)
     fig.update_layout(
-        height=560,
-        paper_bgcolor='#0d1117',
-        plot_bgcolor='#161b22',
+        height=560, paper_bgcolor='#0d1117', plot_bgcolor='#161b22',
         font=dict(color='#e6edf3', family='Noto Sans TC'),
         xaxis_rangeslider_visible=False,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
                     bgcolor='rgba(0,0,0,0)', font=dict(size=12),
                     itemclick='toggle', itemdoubleclick='toggleothers'),
-        margin=dict(l=50, r=20, t=45, b=20),
-        hovermode='x unified'
-    )
+        margin=dict(l=50, r=20, t=45, b=20), hovermode='x unified')
     fig.update_xaxes(gridcolor='#21262d', showgrid=True, tickfont=dict(size=10),
                      rangebreaks=[dict(bounds=["sat","mon"])])
     fig.update_yaxes(gridcolor='#21262d', showgrid=True)
@@ -324,18 +281,14 @@ def make_kline_chart(df, name, code, sector, active_mas):
 
 def get_metrics(df):
     close = df['Close']
-    latest = close.iloc[-1]
-    prev   = close.iloc[-2] if len(close)>1 else latest
-    chg    = latest - prev
-    chg_pct = chg/prev*100 if prev else 0
+    latest = close.iloc[-1]; prev = close.iloc[-2] if len(close)>1 else latest
+    chg = latest - prev; chg_pct = chg/prev*100 if prev else 0
     return latest, chg, chg_pct, close.max(), close.min()
 
-# ── Main ─────────────────────────────────────────────────────────────
+# ── Main UI ───────────────────────────────────────────────────────────
 st.markdown('<div class="main-header"><h1>📈 台股K線分析</h1><p>輸入股票代碼或中文名稱，即時顯示K線圖＋均線＋成交量</p></div>', unsafe_allow_html=True)
-
 init_folders()
 
-# ── Sidebar ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 📁 自選股資料夾")
     folder_names = list(st.session_state.folders.keys())
@@ -345,53 +298,39 @@ with st.sidebar:
             st.session_state.cur_folder = fn
             st.session_state.batch_codes = stocks.copy()
             st.session_state.do_analyze = False
-
     st.markdown("---")
     st.markdown("**當前資料夾：** " + st.session_state.cur_folder)
     cur = st.session_state.cur_folder
     cur_stocks = st.session_state.folders.get(cur, [])
-
     with st.expander("➕ 新增股票"):
         add_code = st.text_input("輸入代碼", key="add_code_input", placeholder="e.g. 2330")
         if st.button("新增", key="btn_add"):
             c = add_code.strip()
             if c and c not in st.session_state.folders[cur]:
                 st.session_state.folders[cur].append(c)
-                save_folders()
-                st.success(f"已新增 {c}")
-                st.rerun()
-
+                save_folders(); st.success(f"已新增 {c}"); st.rerun()
     with st.expander("🗑️ 移除股票"):
         if cur_stocks:
             rm = st.selectbox("選擇移除", cur_stocks, key="rm_select")
             if st.button("移除", key="btn_rm"):
                 st.session_state.folders[cur].remove(rm)
-                save_folders()
-                st.success(f"已移除 {rm}")
-                st.rerun()
+                save_folders(); st.success(f"已移除 {rm}"); st.rerun()
         else:
             st.caption("資料夾是空的")
-
     with st.expander("📁 管理資料夾"):
         new_folder = st.text_input("新資料夾名稱", key="new_folder_input")
         if st.button("建立資料夾", key="btn_new_folder"):
             nf = new_folder.strip()
             if nf and nf not in st.session_state.folders:
-                st.session_state.folders[nf] = []
-                save_folders()
-                st.success(f"已建立 {nf}")
-                st.rerun()
+                st.session_state.folders[nf] = []; save_folders(); st.success(f"已建立 {nf}"); st.rerun()
         if len(folder_names) > 1:
             del_folder = st.selectbox("刪除資料夾", folder_names, key="del_folder_select")
             if st.button("刪除資料夾", key="btn_del_folder"):
                 del st.session_state.folders[del_folder]
                 st.session_state.cur_folder = list(st.session_state.folders.keys())[0]
-                save_folders()
-                st.rerun()
-
+                save_folders(); st.rerun()
     st.markdown("---")
     period = st.radio("📅 期間", ["1個月","3個月","6個月","1年","2年","3年"], index=2, key="period_select")
-
     st.markdown("---")
     st.markdown("**📊 均線顯示**")
     active_mas = []
@@ -399,17 +338,11 @@ with st.sidebar:
     cols_ma = st.columns(2)
     for i, (n, color) in enumerate(MA_CONFIG):
         col = cols_ma[i % 2]
-        checked = col.checkbox(f"MA{n}", value=defaults[n], key=f"ma_toggle_{n}")
-        if checked:
+        if col.checkbox(f"MA{n}", value=defaults[n], key=f"ma_toggle_{n}"):
             active_mas.append(f"MA{n}")
 
-# ── Search ────────────────────────────────────────────────────────────
-user_input = st.text_input(
-    "🔍",
-    key="main_input",
-    placeholder="e.g. 2330 或 台積電（按 Enter 分析）",
-    label_visibility="collapsed"
-)
+user_input = st.text_input("🔍", key="main_input",
+    placeholder="e.g. 2330 或 台積電（按 Enter 分析）", label_visibility="collapsed")
 
 if user_input and user_input != st.session_state.get('last_input',''):
     st.session_state.last_input = user_input
@@ -418,21 +351,16 @@ if user_input and user_input != st.session_state.get('last_input',''):
 
 batch = st.session_state.get('batch_codes', [])
 
-# ── Render stock ──────────────────────────────────────────────────────
 def render_stock(code_raw, period, active_mas):
     ticker_sym = resolve(code_raw)
     base_code  = ticker_sym.split('.')[0]
     name, _, sector = get_info(base_code)
-
     df = get_ohlcv(ticker_sym, period)
     if df is None or len(df) < 5:
-        st.warning(f"⚠️ 無法取得 {code_raw} 的資料")
-        return
-
+        st.warning(f"⚠️ 無法取得 {code_raw} 的資料"); return
     latest, chg, chg_pct, high_val, low_val = get_metrics(df)
     chg_class = "up" if chg >= 0 else "down"
     sign = "+" if chg >= 0 else ""
-
     st.markdown(f"""
     <div class="stock-card">
       <div class="card-header">
@@ -447,21 +375,14 @@ def render_stock(code_raw, period, active_mas):
         <div class="metric-box"><div class="metric-label">區間最高</div><div class="metric-value up">{high_val:.2f}</div></div>
         <div class="metric-box"><div class="metric-label">區間最低</div><div class="metric-value down">{low_val:.2f}</div></div>
       </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # K-Line chart
+    </div>""", unsafe_allow_html=True)
     fig = make_kline_chart(df, name or code_raw, base_code, sector, active_mas)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-    # ── 三大法人 20天明細 ─────────────────────────────────────────
     with st.expander("🏦 三大法人明細（近20個交易日）", expanded=True):
         with st.spinner("載入三大法人資料..."):
-            inst_rows = get_institutional_20d(base_code)
-        table_html = render_inst_table(inst_rows)
-        st.markdown(table_html, unsafe_allow_html=True)
+            rows = get_institutional_20d(base_code)
+        st.markdown(render_inst_table(rows), unsafe_allow_html=True)
 
-# Suggestions
 if user_input and not st.session_state.get('do_analyze'):
     results = search_stocks(user_input)
     if results and not any(r[0] == user_input for r in results):
@@ -474,7 +395,6 @@ if user_input and not st.session_state.get('do_analyze'):
             st.session_state.batch_codes = []
             st.rerun()
 
-# ── Render ────────────────────────────────────────────────────────────
 if batch:
     st.markdown(f"### 📁 {st.session_state.cur_folder}")
     for c in batch:
