@@ -205,12 +205,15 @@ def get_ohlcv(ticker_symbol, period):
 
 def make_kline_chart(df, name, code, sector, active_mas):
     df = df.copy()
-    # Drop rows with no volume (holidays / non-trading days)
+    # Keep only trading days (volume > 0)
     df = df[df['Volume'] > 0].copy()
+    df = df.sort_index()
 
     for n, _ in MA_CONFIG:
         df[f'MA{n}'] = df['Close'].rolling(n).mean()
 
+    # Use string dates so Plotly treats x as category (no date gaps)
+    x_labels = df.index.strftime('%Y-%m-%d').tolist()
     colors = ['#3fb950' if c >= o else '#f85149' for c, o in zip(df['Close'], df['Open'])]
 
     fig = make_subplots(
@@ -220,46 +223,45 @@ def make_kline_chart(df, name, code, sector, active_mas):
     )
 
     fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        x=x_labels,
+        open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         increasing=dict(line=dict(color='#3fb950'), fillcolor='#3fb950'),
         decreasing=dict(line=dict(color='#f85149'), fillcolor='#f85149'),
-        name='K線', showlegend=False), row=1, col=1)
+        name='K線', showlegend=False,
+        xaxis='x', yaxis='y'
+    ), row=1, col=1)
 
     for n, color in MA_CONFIG:
         key = f'MA{n}'
         fig.add_trace(go.Scatter(
-            x=df.index, y=df[key], name=key,
+            x=x_labels, y=df[key], name=key,
             line=dict(color=color, width=1.5),
             visible=True if key in active_mas else 'legendonly',
             hovertemplate='%{y:.2f}'
         ), row=1, col=1)
 
     fig.add_trace(go.Bar(
-        x=df.index, y=df['Volume'], marker_color=colors,
+        x=x_labels, y=df['Volume'],
+        marker_color=colors,
         name='成交量', showlegend=False, opacity=0.8
     ), row=2, col=1)
 
-    # Build list of all non-trading days to hide (weekends + holidays)
-    # Use the actual trading dates to figure out gaps > 1 day
-    dates = df.index.normalize().unique().sort_values()
-    all_days = pd.date_range(start=dates[0], end=dates[-1], freq='D')
-    missing = all_days.difference(dates)
-
-    rangebreaks = [dict(bounds=['sat', 'mon'])]   # always skip weekends
-    if len(missing) > 0:
-        # Add individual holiday breaks
-        for d in missing:
-            if d.weekday() < 5:  # weekday = not weekend → holiday
-                rangebreaks.append(dict(values=[d.strftime('%Y-%m-%d')]))
+    # Range selector using tick indices instead of dates
+    n_total = len(x_labels)
+    def idx_from_months(m):
+        # approximate trading days per month = 21
+        return max(0, n_total - m * 21)
+    def idx_from_years(y):
+        return max(0, n_total - y * 252)
 
     rangeselector = dict(
         buttons=[
-            dict(count=1,  label='1M',  step='month', stepmode='backward'),
-            dict(count=3,  label='3M',  step='month', stepmode='backward'),
-            dict(count=6,  label='6M',  step='month', stepmode='backward'),
-            dict(count=1,  label='1Y',  step='year',  stepmode='backward'),
-            dict(count=2,  label='2Y',  step='year',  stepmode='backward'),
-            dict(step='all', label='全部'),
+            dict(label='1M',  method='relayout', args=[{'xaxis.range': [idx_from_months(1),  n_total-1]}]),
+            dict(label='3M',  method='relayout', args=[{'xaxis.range': [idx_from_months(3),  n_total-1]}]),
+            dict(label='6M',  method='relayout', args=[{'xaxis.range': [idx_from_months(6),  n_total-1]}]),
+            dict(label='1Y',  method='relayout', args=[{'xaxis.range': [idx_from_years(1),   n_total-1]}]),
+            dict(label='2Y',  method='relayout', args=[{'xaxis.range': [idx_from_years(2),   n_total-1]}]),
+            dict(label='全部', method='relayout', args=[{'xaxis.range': [0, n_total-1]}]),
         ],
         bgcolor='#21262d', activecolor='#58a6ff',
         bordercolor='#30363d', borderwidth=1,
@@ -273,6 +275,7 @@ def make_kline_chart(df, name, code, sector, active_mas):
         plot_bgcolor='#161b22',
         font=dict(color='#e6edf3', family='Noto Sans TC'),
         xaxis=dict(
+            type='category',
             rangeslider=dict(
                 visible=True,
                 thickness=0.05,
@@ -280,24 +283,40 @@ def make_kline_chart(df, name, code, sector, active_mas):
                 bordercolor='#30363d',
                 borderwidth=1,
             ),
-            rangeselector=rangeselector,
-            type='date',
+            updatemenus=[],
             gridcolor='#21262d',
-            rangebreaks=rangebreaks,
-            tickfont=dict(size=10),
+            tickmode='array',
+            # Show one tick per month roughly
+            tickvals=[x_labels[i] for i in range(0, n_total, max(1, n_total//24))],
+            ticktext=[x_labels[i][:7] for i in range(0, n_total, max(1, n_total//24))],
+            tickfont=dict(size=9),
+            range=[max(0, n_total-252*2-1), n_total-1],  # default show last 2 years
         ),
         xaxis2=dict(
-            type='date',
+            type='category',
             gridcolor='#21262d',
-            rangebreaks=rangebreaks,
-            tickfont=dict(size=10),
+            tickmode='array',
+            tickvals=[x_labels[i] for i in range(0, n_total, max(1, n_total//24))],
+            ticktext=[x_labels[i][:7] for i in range(0, n_total, max(1, n_total//24))],
+            tickfont=dict(size=9),
         ),
+        updatemenus=[dict(
+            type='buttons',
+            direction='right',
+            x=0, y=1.08, xanchor='left',
+            bgcolor='#21262d', bordercolor='#30363d',
+            font=dict(color='#e6edf3', size=11),
+            buttons=rangeselector['buttons'],
+            showactive=True,
+            active=3,  # default = 1Y (index 3)
+            pad=dict(r=5, t=0),
+        )],
         legend=dict(
             orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
             bgcolor='rgba(0,0,0,0)', font=dict(size=12),
             itemclick='toggle', itemdoubleclick='toggleothers'
         ),
-        margin=dict(l=50, r=20, t=50, b=10),
+        margin=dict(l=50, r=20, t=60, b=10),
         hovermode='x unified',
         dragmode='zoom',
     )
